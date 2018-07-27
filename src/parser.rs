@@ -1,9 +1,27 @@
+use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
-use types::*;
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+struct Pos {
+    r: usize,
+    c: usize,
+}
+
+impl fmt::Display for Pos {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({}, {})", self.r, self.c)
+    }
+}
+
+impl Pos {
+    fn new(r: usize, c: usize) -> Self {
+        Pos { r, c }
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 struct Token {
-    pos: (usize, usize),
+    pos: Pos,
     ty: TokenType,
 }
 
@@ -54,8 +72,8 @@ enum TokenType {
 pub struct Tokenizer {
     chars: Vec<char>,
     index: usize,
-    pos: (usize, usize),
-    prev_pos: (usize, usize),
+    pos: Pos,
+    prev_pos: Pos,
 }
 
 pub struct Parser {
@@ -104,8 +122,8 @@ impl Tokenizer {
         Tokenizer {
             chars: input.replace("\r\n", "\n").chars().collect(),
             index: 0,
-            pos: (0, 0),
-            prev_pos: (0, 0),
+            pos: Pos::new(0, 0),
+            prev_pos: Pos::new(0, 0),
         }
     }
 
@@ -137,9 +155,9 @@ impl Tokenizer {
         let ch = self.chars[self.index];
         self.prev_pos = self.pos;
         self.pos = if ch == '\n' {
-            (self.pos.0 + 1, 0)
+            Pos::new(self.pos.r + 1, 0)
         } else {
-            (self.pos.0, self.pos.1 + 1)
+            Pos::new(self.pos.r, self.pos.c + 1)
         };
         self.index += 1;
         Ok(ch)
@@ -190,8 +208,8 @@ impl Tokenizer {
             }
             Ok(c) if c.is_alphabetic() => self.tokenize_id(),
             Ok(c) => Err(TokenizerError::Str(format!(
-                "({}, {}) tokenize_one(): unexpected char '{}'",
-                self.pos.0, self.pos.1, c,
+                "{} tokenize_one(): unexpected char '{}'",
+                self.pos, c,
             ))),
             Err(err) => Err(err),
         }
@@ -216,8 +234,8 @@ impl Tokenizer {
                 Ok(ch) if ch.is_numeric() => num_chars.push(self.next()?),
                 Ok(ch @ '.') => if is_float {
                     return Err(TokenizerError::Str(format!(
-                        "({}, {}) tokenize_num(): unexpected char '{}'",
-                        self.pos.0, self.pos.1, ch
+                        "{} tokenize_num(): unexpected char '{}'",
+                        self.pos, ch
                     )));
                 } else {
                     is_float = true;
@@ -226,8 +244,8 @@ impl Tokenizer {
                 Ok('e') => {
                     if num_chars.is_empty() {
                         return Err(TokenizerError::Str(format!(
-                            "({}, {}) tokenize_num(): no number",
-                            self.pos.0, self.pos.1
+                            "{} tokenize_num(): no number",
+                            self.pos
                         )));
                     }
                     let _ = self.next();
@@ -261,8 +279,8 @@ impl Tokenizer {
                         }
                         _ => {
                             return Err(TokenizerError::Str(format!(
-                                "({}, {}) tokenize_num(): no number",
-                                start_pos.0, start_pos.1
+                                "{} tokenize_num(): no number",
+                                start_pos
                             )))
                         }
                     }
@@ -273,8 +291,8 @@ impl Tokenizer {
         }
         if num_chars.is_empty() {
             return Err(TokenizerError::Str(format!(
-                "({}, {}) tokenize_num(): no number",
-                self.pos.0, self.pos.1
+                "{} tokenize_num(): no number",
+                self.pos
             )));
         }
         if is_float {
@@ -297,8 +315,8 @@ impl Tokenizer {
             Ok(_) => (),
             Err(TokenizerError::Eof) => {
                 return Err(TokenizerError::Str(format!(
-                    "({}, {}) tokenize_str(): EOF while processing string",
-                    self.pos.0, self.pos.1
+                    "{} tokenize_str(): EOF while processing string",
+                    self.pos
                 )))
             }
             Err(err) => return Err(err),
@@ -311,8 +329,8 @@ impl Tokenizer {
                     Ok(ch) => str_chars.push(ch),
                     Err(TokenizerError::Eof) => {
                         return Err(TokenizerError::Str(format!(
-                            "({}, {}) tokenize_str(): EOF while processing escape seq",
-                            self.prev_pos.0, self.prev_pos.1
+                            "{} tokenize_str(): EOF while processing escape seq",
+                            self.prev_pos
                         )))
                     }
                     Err(err) => return Err(err),
@@ -326,8 +344,8 @@ impl Tokenizer {
                 Ok(ch) => str_chars.push(ch),
                 Err(TokenizerError::Eof) => {
                     return Err(TokenizerError::Str(format!(
-                        "({}, {}) tokenize_str(): EOF while processing string",
-                        self.pos.0, self.pos.1
+                        "{} tokenize_str(): EOF while processing string",
+                        self.pos
                     )))
                 }
                 Err(err) => return Err(err),
@@ -347,8 +365,8 @@ impl Tokenizer {
         }
         if id_chars.is_empty() {
             return Err(TokenizerError::Str(format!(
-                "({}, {}) tokenize_id(): no identifier",
-                self.pos.0, self.pos.1
+                "{} tokenize_id(): no identifier",
+                self.pos
             )));
         }
         Ok(Token {
@@ -407,49 +425,88 @@ impl Parser {
 
     fn parse_ints(&mut self) -> ParserResult<Vec<isize>> {
         let mut values = vec![];
+        loop {
+            match self.peek() {
+                Ok(Token {
+                    ty: TokenType::Int(i),
+                    ..
+                }) => {
+                    values.push(i);
+                    let _ = self.next();
+                }
+                Ok(Token { pos, ty }) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(format!(
+                            "{} parse_ints(): expected int but got {:?}",
+                            pos, ty
+                        )));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(ParserError::Eof) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(
+                            "parse_ints(): EOF while processing ints".to_owned(),
+                        ));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    fn parse_list<T>(
+        &mut self,
+        parser: fn(&mut Self) -> ParserResult<Vec<T>>,
+    ) -> ParserResult<Vec<T>> {
         match self.peek() {
             Ok(Token {
                 ty: TokenType::LBracket,
                 ..
             }) => {
                 let _ = self.next();
-                loop {
-                    match self.next() {
-                        Ok(Token {
-                            ty: TokenType::RBracket,
-                            ..
-                        }) => return Ok(values),
-                        Ok(Token { pos, ty }) => match ty {
-                            TokenType::Int(i) => values.push(i),
-                            _ => {
-                                return Err(ParserError::Str(format!(
-                                    "({}, {}) parse_ints(): expected int but got {:?}",
-                                    pos.0, pos.1, ty
-                                )))
-                            }
-                        },
-                        Err(ParserError::Eof) => {
-                            return Err(ParserError::Str(
-                                "parse_ints(): EOF while processing ints".to_owned(),
-                            ))
-                        }
-                        Err(err) => return Err(err),
-                    }
+                let values = parser(self)?;
+                match self.peek() {
+                    Ok(Token {
+                        ty: TokenType::RBracket,
+                        ..
+                    }) => Ok(values),
+                    Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                        "{} parse_list(): expected ']' but got {:?}",
+                        pos, ty
+                    ))),
+                    Err(ParserError::Eof) => Err(ParserError::Str(
+                        "parse_list(): EOF while processing list".to_owned(),
+                    )),
+                    Err(err) => Err(err),
                 }
             }
-            Ok(Token {
-                ty: TokenType::Int(i),
-                ..
-            }) => {
-                values.push(i);
-                Ok(values)
-            }
             Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
-                "({}, {}) parse_ints(): expected int but got {:?}",
-                pos.0, pos.1, ty
+                "{} parse_list(): expected '[' but got {:?}",
+                pos, ty
             ))),
             Err(ParserError::Eof) => Err(ParserError::Str(
-                "parse_ints(): EOF while processing ints".to_owned(),
+                "parse_list(): EOF while processing list".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn parse_one_or_list<T>(
+        &mut self,
+        parser: fn(&mut Self) -> ParserResult<Vec<T>>,
+    ) -> ParserResult<Vec<T>> {
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::LBracket,
+                ..
+            }) => self.parse_list(parser),
+            Ok(_) => parser(self),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_list(): EOF while processing list".to_owned(),
             )),
             Err(err) => Err(err),
         }
@@ -457,129 +514,94 @@ impl Parser {
 
     fn parse_bools(&mut self) -> ParserResult<Vec<bool>> {
         let mut values = vec![];
-        match self.peek() {
-            Ok(Token {
-                ty: TokenType::LBracket,
-                ..
-            }) => {
-                let _ = self.next();
-                loop {
-                    match self.next() {
-                        Ok(Token {
-                            ty: TokenType::RBracket,
-                            ..
-                        }) => return Ok(values),
-                        Ok(Token { pos, ty }) => match ty {
-                            TokenType::Str(s) => match s.as_ref() {
-                                "true" => values.push(true),
-                                "false" => values.push(false),
-                                _ => {
-                                    return Err(ParserError::Str(format!(
-                                        "({}, {}) parse_bools(): expected bool but got {:?}",
-                                        pos.0, pos.1, s
-                                    )))
-                                }
-                            },
-                            _ => {
-                                return Err(ParserError::Str(format!(
-                                    "({}, {}) parse_bools(): expected bool but got {:?}",
-                                    pos.0, pos.1, ty
-                                )))
-                            }
-                        },
-                        Err(ParserError::Eof) => {
-                            return Err(ParserError::Str(
-                                "parse_bools(): EOF while processing bools".to_owned(),
-                            ))
-                        }
-                        Err(err) => return Err(err),
+        loop {
+            match self.peek() {
+                Ok(Token {
+                    pos,
+                    ty: TokenType::Str(s),
+                }) => match s.as_ref() {
+                    "true" => {
+                        values.push(true);
+                        let _ = self.next();
                     }
-                }
-            }
-            Ok(Token {
-                pos,
-                ty: TokenType::Str(s),
-            }) => {
-                match s.as_ref() {
-                    "true" => values.push(true),
-                    "false" => values.push(false),
+                    "false" => {
+                        values.push(false);
+                        let _ = self.next();
+                    }
                     _ => {
                         return Err(ParserError::Str(format!(
-                            "({}, {}) parse_bools(): expected bool but got {:?}",
-                            pos.0, pos.1, s
+                            "{} parse_bools(): expected bool but got {:?}",
+                            pos, s
                         )))
                     }
+                },
+                Ok(Token { pos, ty }) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(format!(
+                            "{} parse_bools(): expected bool but got {:?}",
+                            pos, ty
+                        )));
+                    } else {
+                        return Ok(values);
+                    }
                 }
-                Ok(values)
+                Err(ParserError::Eof) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(
+                            "parse_bools(): EOF while processing bools".to_owned(),
+                        ));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(err) => return Err(err),
             }
-            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
-                "({}, {}) parse_bools(): expected bool but got {:?}",
-                pos.0, pos.1, ty
-            ))),
-            Err(ParserError::Eof) => Err(ParserError::Str(
-                "tokenize_bools(): EOF while processing bools".to_owned(),
-            )),
-            Err(err) => Err(err),
         }
     }
 
     fn parse_floats(&mut self) -> ParserResult<Vec<f64>> {
         let mut values = vec![];
-        match self.peek() {
-            Ok(Token {
-                ty: TokenType::LBracket,
-                ..
-            }) => {
-                let _ = self.next();
-                loop {
-                    match self.next() {
-                        Ok(Token {
-                            ty: TokenType::RBracket,
-                            ..
-                        }) => return Ok(values),
-                        Ok(Token { pos, ty }) => match ty {
-                            TokenType::Float(f) => values.push(f),
-                            TokenType::Int(i) => values.push(i as f64),
-                            _ => {
-                                return Err(ParserError::Str(format!(
-                                    "({}, {}) parse_floats(): expected float but got {:?}",
-                                    pos.0, pos.1, ty
-                                )))
-                            }
-                        },
-                        Err(ParserError::Eof) => {
-                            return Err(ParserError::Str(
-                                "parse_floats(): EOF while processing floats".to_owned(),
-                            ))
-                        }
-                        Err(err) => return Err(err),
+        loop {
+            match self.peek() {
+                Ok(Token {
+                    ty: TokenType::Float(f),
+                    ..
+                }) => {
+                    values.push(f);
+                    let _ = self.next();
+                }
+                Ok(Token {
+                    ty: TokenType::Int(i),
+                    ..
+                }) => {
+                    values.push(i as f64);
+                    let _ = self.next();
+                }
+                Ok(Token { pos, ty }) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(format!(
+                            "{} parse_floats(): expected float but got {:?}",
+                            pos, ty
+                        )));
+                    } else {
+                        return Ok(values);
                     }
                 }
+                Err(ParserError::Eof) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(
+                            "parse_floats(): EOF while processing floats".to_owned(),
+                        ));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(err) => return Err(err),
             }
-            Ok(Token {
-                ty: TokenType::Int(i),
-                ..
-            }) => {
-                values.push(i as f64);
-                Ok(values)
-            }
-            Ok(Token {
-                ty: TokenType::Float(f),
-                ..
-            }) => {
-                values.push(f);
-                Ok(values)
-            }
-            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
-                "({}, {}) parse_floats(): expected float but got {:?}",
-                pos.0, pos.1, ty
-            ))),
-            Err(ParserError::Eof) => Err(ParserError::Str(
-                "parse_floats(): EOF while processing floats".to_owned(),
-            )),
-            Err(err) => Err(err),
         }
     }
+
+    // fn parse_point2s(&mut self)
 }
 
 #[cfg(test)]
@@ -596,7 +618,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("  # comment\n123"),
             Ok(vec![Token {
-                pos: (1, 0),
+                pos: Pos::new(1, 0),
                 ty: TokenType::Int(123),
             }])
         );
@@ -607,7 +629,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("123"),
             Ok(vec![Token {
-                pos: (0, 0),
+                pos: Pos::new(0, 0),
                 ty: TokenType::Int(123),
             }])
         );
@@ -618,7 +640,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("-123"),
             Ok(vec![Token {
-                pos: (0, 0),
+                pos: Pos::new(0, 0),
                 ty: TokenType::Int(-123),
             }])
         );
@@ -629,7 +651,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("-1.23"),
             Ok(vec![Token {
-                pos: (0, 0),
+                pos: Pos::new(0, 0),
                 ty: TokenType::Float(-1.23),
             }])
         );
@@ -640,7 +662,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1.23"),
             Ok(vec![Token {
-                pos: (0, 0),
+                pos: Pos::new(0, 0),
                 ty: TokenType::Float(1.23),
             }])
         );
@@ -651,7 +673,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1.23e12"),
             Ok(vec![Token {
-                pos: (0, 0),
+                pos: Pos::new(0, 0),
                 ty: TokenType::Float(1.23 * f64::powf(10.0, 12.0)),
             }])
         );
@@ -662,7 +684,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1.23e-12"),
             Ok(vec![Token {
-                pos: (0, 0),
+                pos: Pos::new(0, 0),
                 ty: TokenType::Float(1.23 * f64::powf(10.0, -12.0)),
             }])
         );
@@ -673,7 +695,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1e12"),
             Ok(vec![Token {
-                pos: (0, 0),
+                pos: Pos::new(0, 0),
                 ty: TokenType::Int(isize::pow(10, 12)),
             }])
         );
@@ -695,27 +717,27 @@ mod tests {
             Tokenizer::tokenize("Accelerator \"kdtree\" \"float emptybonus\" [0.1]"),
             Ok(vec![
                 Token {
-                    pos: (0, 0),
+                    pos: Pos::new(0, 0),
                     ty: TokenType::Identifier("Accelerator".to_owned()),
                 },
                 Token {
-                    pos: (0, 12),
+                    pos: Pos::new(0, 12),
                     ty: TokenType::Str("kdtree".to_owned()),
                 },
                 Token {
-                    pos: (0, 21),
+                    pos: Pos::new(0, 21),
                     ty: TokenType::Str("float emptybonus".to_owned()),
                 },
                 Token {
-                    pos: (0, 40),
+                    pos: Pos::new(0, 40),
                     ty: TokenType::LBracket,
                 },
                 Token {
-                    pos: (0, 41),
+                    pos: Pos::new(0, 41),
                     ty: TokenType::Float(0.1),
                 },
                 Token {
-                    pos: (0, 44),
+                    pos: Pos::new(0, 44),
                     ty: TokenType::RBracket,
                 },
             ])
@@ -725,54 +747,69 @@ mod tests {
     #[test]
     fn test_parse_one_int() {
         let mut parser = Parser::new("1").unwrap();
-        assert_eq!(parser.parse_ints(), Ok(vec![1]));
+        assert_eq!(parser.parse_one_or_list(Parser::parse_ints), Ok(vec![1]));
     }
 
     #[test]
     fn test_parse_ints() {
         let mut parser = Parser::new("[1 2 3]").unwrap();
-        assert_eq!(parser.parse_ints(), Ok(vec![1, 2, 3]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_ints),
+            Ok(vec![1, 2, 3])
+        );
     }
 
     #[test]
     fn test_parse_ints_err() {
         let mut parser = Parser::new("[1 2 3.0]").unwrap();
-        assert!(parser.parse_ints().is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_ints).is_err());
     }
 
     #[test]
     fn test_parse_one_bool() {
         let mut parser = Parser::new(r#"["true"]"#).unwrap();
-        assert_eq!(parser.parse_bools(), Ok(vec![true]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_bools),
+            Ok(vec![true])
+        );
     }
 
     #[test]
     fn test_parse_bools() {
         let mut parser = Parser::new(r#"["true" "false" "true"]"#).unwrap();
-        assert_eq!(parser.parse_bools(), Ok(vec![true, false, true]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_bools),
+            Ok(vec![true, false, true])
+        );
     }
 
     #[test]
     fn test_parse_bools_err() {
         let mut parser = Parser::new(r#"["true" "false" 3.0]"#).unwrap();
-        assert!(parser.parse_bools().is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_bools).is_err());
     }
 
     #[test]
     fn test_parse_one_float() {
         let mut parser = Parser::new("1.0").unwrap();
-        assert_eq!(parser.parse_floats(), Ok(vec![1.0]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_floats),
+            Ok(vec![1.0])
+        );
     }
 
     #[test]
     fn test_parse_floats() {
         let mut parser = Parser::new("[1 2.0 3]").unwrap();
-        assert_eq!(parser.parse_floats(), Ok(vec![1.0, 2.0, 3.0]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_floats),
+            Ok(vec![1.0, 2.0, 3.0])
+        );
     }
 
     #[test]
     fn test_parse_floats_err() {
         let mut parser = Parser::new("[1 test 2]").unwrap();
-        assert!(parser.parse_floats().is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_floats).is_err());
     }
 }

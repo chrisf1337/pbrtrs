@@ -522,6 +522,64 @@ impl Parser {
             Err(err) => Err(err),
         }
     }
+
+    fn parse_floats(&mut self) -> ParserResult<Vec<f64>> {
+        let mut values = vec![];
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::LBracket,
+                ..
+            }) => {
+                let _ = self.next();
+                loop {
+                    match self.next() {
+                        Ok(Token {
+                            ty: TokenType::RBracket,
+                            ..
+                        }) => return Ok(values),
+                        Ok(Token { pos, ty }) => match ty {
+                            TokenType::Float(f) => values.push(f),
+                            TokenType::Int(i) => values.push(i as f64),
+                            _ => {
+                                return Err(ParserError::Str(format!(
+                                    "({}, {}) parse_floats(): expected float but got {:?}",
+                                    pos.0, pos.1, ty
+                                )))
+                            }
+                        },
+                        Err(ParserError::Eof) => {
+                            return Err(ParserError::Str(
+                                "parse_floats(): EOF while processing floats".to_owned(),
+                            ))
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+            }
+            Ok(Token {
+                ty: TokenType::Int(i),
+                ..
+            }) => {
+                values.push(i as f64);
+                Ok(values)
+            }
+            Ok(Token {
+                ty: TokenType::Float(f),
+                ..
+            }) => {
+                values.push(f);
+                Ok(values)
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "({}, {}) parse_floats(): expected float but got {:?}",
+                pos.0, pos.1, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_floats(): EOF while processing floats".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -665,6 +723,12 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_one_int() {
+        let mut parser = Parser::new("1").unwrap();
+        assert_eq!(parser.parse_ints(), Ok(vec![1]));
+    }
+
+    #[test]
     fn test_parse_ints() {
         let mut parser = Parser::new("[1 2 3]").unwrap();
         assert_eq!(parser.parse_ints(), Ok(vec![1, 2, 3]));
@@ -677,6 +741,12 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_one_bool() {
+        let mut parser = Parser::new(r#"["true"]"#).unwrap();
+        assert_eq!(parser.parse_bools(), Ok(vec![true]));
+    }
+
+    #[test]
     fn test_parse_bools() {
         let mut parser = Parser::new(r#"["true" "false" "true"]"#).unwrap();
         assert_eq!(parser.parse_bools(), Ok(vec![true, false, true]));
@@ -686,5 +756,23 @@ mod tests {
     fn test_parse_bools_err() {
         let mut parser = Parser::new(r#"["true" "false" 3.0]"#).unwrap();
         assert!(parser.parse_bools().is_err());
+    }
+
+    #[test]
+    fn test_parse_one_float() {
+        let mut parser = Parser::new("1.0").unwrap();
+        assert_eq!(parser.parse_floats(), Ok(vec![1.0]));
+    }
+
+    #[test]
+    fn test_parse_floats() {
+        let mut parser = Parser::new("[1 2.0 3]").unwrap();
+        assert_eq!(parser.parse_floats(), Ok(vec![1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn test_parse_floats_err() {
+        let mut parser = Parser::new("[1 test 2]").unwrap();
+        assert!(parser.parse_floats().is_err());
     }
 }

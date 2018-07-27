@@ -1,6 +1,7 @@
 use std::num::{ParseFloatError, ParseIntError};
+use types::*;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct Token {
     pos: (usize, usize),
     ty: TokenType,
@@ -12,7 +13,34 @@ impl Token {
     }
 }
 
-#[derive(Debug, PartialEq)]
+pub struct Config {
+    before_transforms: Vec<Transform>,
+    after_transforms: Vec<Transform>,
+    transforms: Vec<Transform>,
+}
+
+pub enum Transform {
+    Identity,
+    Translate(f64, f64, f64),
+    Scale(f64, f64, f64),
+}
+
+pub struct Param<T> {
+    name: String,
+    values: Vec<T>,
+}
+
+pub enum ParamType {
+    Bool,
+    Int,
+    Float,
+    Point2,
+    Point3,
+    Vector3,
+    Normal3,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 enum TokenType {
     Identifier(String),
     Int(isize),
@@ -30,10 +58,22 @@ pub struct Tokenizer {
     prev_pos: (usize, usize),
 }
 
+pub struct Parser {
+    tokens: Vec<Token>,
+    index: usize,
+}
+
 pub type TokenizerResult<T> = Result<T, TokenizerError>;
+pub type ParserResult<T> = Result<T, ParserError>;
 
 #[derive(Debug, PartialEq)]
 pub enum TokenizerError {
+    Str(String),
+    Eof,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ParserError {
     Str(String),
     Eof,
 }
@@ -47,6 +87,15 @@ impl From<ParseIntError> for TokenizerError {
 impl From<ParseFloatError> for TokenizerError {
     fn from(err: ParseFloatError) -> Self {
         TokenizerError::Str(err.to_string())
+    }
+}
+
+impl From<TokenizerError> for ParserError {
+    fn from(err: TokenizerError) -> Self {
+        match err {
+            TokenizerError::Str(s) => ParserError::Str(s),
+            TokenizerError::Eof => ParserError::Eof,
+        }
     }
 }
 
@@ -309,6 +358,172 @@ impl Tokenizer {
     }
 }
 
+impl Parser {
+    fn new(input: &str) -> ParserResult<Self> {
+        Ok(Parser {
+            tokens: Tokenizer::tokenize(input)?,
+            index: 0,
+        })
+    }
+
+    fn peek(&self) -> ParserResult<Token> {
+        if !self.is_empty() {
+            Ok(self.tokens[self.index].clone())
+        } else {
+            Err(ParserError::Eof)
+        }
+    }
+
+    fn next(&mut self) -> ParserResult<Token> {
+        if self.is_empty() {
+            return Err(ParserError::Eof);
+        }
+        let tok = self.tokens[self.index].clone();
+        self.index += 1;
+        Ok(tok)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.index >= self.tokens.len()
+    }
+
+    // fn parse_param(&mut self) -> ParserResult<Param> {
+    //     match self.peek() {
+    //         Ok(Token { pos, ty: TokenType::Str(s) }) => {
+    //             let split = s.split_whitespace();
+    //             if split.len() != 2 {
+    //                 return Err(ParserError::Str(format!("({}, {}) parse_param(): expecting two words in string, got {}", pos.0, pos.1, s)));
+    //             }
+    //             match split[0].as_ref() {
+    //                 "int" =>
+    //             }
+    //         }
+    //         Ok(tok) => Err(ParserError::Str(format!("({}, {}) parse_param(): expecting string, got {:?}", tok.pos.0, tok.pos.1, tok))),
+    //         Err(ParserError::Eof) =>
+    //                 Err(ParserError::Str("tokenize_str(): EOF while processing string".to_owned())),
+    //         Err(err) => Err(err),
+    //     }
+    // }
+
+    fn parse_ints(&mut self) -> ParserResult<Vec<isize>> {
+        let mut values = vec![];
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::LBracket,
+                ..
+            }) => {
+                let _ = self.next();
+                loop {
+                    match self.next() {
+                        Ok(Token {
+                            ty: TokenType::RBracket,
+                            ..
+                        }) => return Ok(values),
+                        Ok(Token { pos, ty }) => match ty {
+                            TokenType::Int(i) => values.push(i),
+                            _ => {
+                                return Err(ParserError::Str(format!(
+                                    "({}, {}) parse_ints(): expected int but got {:?}",
+                                    pos.0, pos.1, ty
+                                )))
+                            }
+                        },
+                        Err(ParserError::Eof) => {
+                            return Err(ParserError::Str(
+                                "parse_ints(): EOF while processing ints".to_owned(),
+                            ))
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+            }
+            Ok(Token {
+                ty: TokenType::Int(i),
+                ..
+            }) => {
+                values.push(i);
+                Ok(values)
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "({}, {}) parse_ints(): expected int but got {:?}",
+                pos.0, pos.1, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_ints(): EOF while processing ints".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn parse_bools(&mut self) -> ParserResult<Vec<bool>> {
+        let mut values = vec![];
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::LBracket,
+                ..
+            }) => {
+                let _ = self.next();
+                loop {
+                    match self.next() {
+                        Ok(Token {
+                            ty: TokenType::RBracket,
+                            ..
+                        }) => return Ok(values),
+                        Ok(Token { pos, ty }) => match ty {
+                            TokenType::Str(s) => match s.as_ref() {
+                                "true" => values.push(true),
+                                "false" => values.push(false),
+                                _ => {
+                                    return Err(ParserError::Str(format!(
+                                        "({}, {}) parse_bools(): expected bool but got {:?}",
+                                        pos.0, pos.1, s
+                                    )))
+                                }
+                            },
+                            _ => {
+                                return Err(ParserError::Str(format!(
+                                    "({}, {}) parse_bools(): expected bool but got {:?}",
+                                    pos.0, pos.1, ty
+                                )))
+                            }
+                        },
+                        Err(ParserError::Eof) => {
+                            return Err(ParserError::Str(
+                                "parse_bools(): EOF while processing bools".to_owned(),
+                            ))
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+            }
+            Ok(Token {
+                pos,
+                ty: TokenType::Str(s),
+            }) => {
+                match s.as_ref() {
+                    "true" => values.push(true),
+                    "false" => values.push(false),
+                    _ => {
+                        return Err(ParserError::Str(format!(
+                            "({}, {}) parse_bools(): expected bool but got {:?}",
+                            pos.0, pos.1, s
+                        )))
+                    }
+                }
+                Ok(values)
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "({}, {}) parse_bools(): expected bool but got {:?}",
+                pos.0, pos.1, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "tokenize_bools(): EOF while processing bools".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +662,29 @@ mod tests {
                 },
             ])
         )
+    }
+
+    #[test]
+    fn test_parse_ints() {
+        let mut parser = Parser::new("[1 2 3]").unwrap();
+        assert_eq!(parser.parse_ints(), Ok(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_parse_ints_err() {
+        let mut parser = Parser::new("[1 2 3.0]").unwrap();
+        assert!(parser.parse_ints().is_err());
+    }
+
+    #[test]
+    fn test_parse_bools() {
+        let mut parser = Parser::new(r#"["true" "false" "true"]"#).unwrap();
+        assert_eq!(parser.parse_bools(), Ok(vec![true, false, true]));
+    }
+
+    #[test]
+    fn test_parse_bools_err() {
+        let mut parser = Parser::new(r#"["true" "false" 3.0]"#).unwrap();
+        assert!(parser.parse_bools().is_err());
     }
 }

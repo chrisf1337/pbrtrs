@@ -1,0 +1,4 @@
+AttributeBegin
+    Material "glass"
+    Shape "sphere" "float radius" 1
+AttributeEnd

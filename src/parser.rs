@@ -53,7 +53,7 @@ pub struct ParamSet {
     pub vector2fs: Vec<Param<Vector2f>>,
     pub point3fs: Vec<Param<Point3f>>,
     pub vector3fs: Vec<Param<Vector3f>>,
-    pub normals: Vec<Param<Normal3f>>,
+    pub normal3fs: Vec<Param<Normal3f>>,
     pub spectra: Vec<Param<Spectrum>>,
     pub strings: Vec<Param<String>>,
     pub textures: Vec<Param<String>>,
@@ -69,11 +69,21 @@ impl Default for ParamSet {
             vector2fs: vec![],
             point3fs: vec![],
             vector3fs: vec![],
-            normals: vec![],
+            normal3fs: vec![],
             spectra: vec![],
             strings: vec![],
             textures: vec![],
         }
+    }
+}
+
+impl ParamSet {
+    fn add_float(mut self, p: Param<f64>) -> Self {
+        {
+            let this = &mut self;
+            this.floats.push(p);
+        }
+        self
     }
 }
 
@@ -82,6 +92,7 @@ pub enum Directive {
     Material(DirectiveStruct),
     Shape(DirectiveStruct),
     Attribute(BlockStruct),
+    Transform(BlockStruct),
 }
 
 #[derive(Debug, PartialEq)]
@@ -93,7 +104,6 @@ pub struct DirectiveStruct {
 
 #[derive(Debug, PartialEq)]
 pub struct BlockStruct {
-    ty: String,
     pos: Pos,
     children: Vec<Directive>,
 }
@@ -471,7 +481,7 @@ impl Parser {
     }
 
     fn parse_param_list(&mut self, param_set: &mut ParamSet) -> ParserResult<()> {
-        match self.next() {
+        match self.peek() {
             Ok(Token {
                 pos,
                 ty: TokenType::Str(s),
@@ -486,36 +496,54 @@ impl Parser {
                 let ty = split_s[0];
                 let var = split_s[1];
                 match ty {
-                    "integer" => param_set.ints.push(Param::new(
-                        var,
-                        pos,
-                        self.parse_one_or_list(Self::parse_ints)?,
-                    )),
-                    "float" => param_set.floats.push(Param::new(
-                        var,
-                        pos,
-                        self.parse_one_or_list(Self::parse_floats)?,
-                    )),
-                    "point2" => param_set.point2fs.push(Param::new(
-                        var,
-                        pos,
-                        self.parse_one_or_list(Self::parse_point2fs)?,
-                    )),
-                    "vector2" => param_set.vector2fs.push(Param::new(
-                        var,
-                        pos,
-                        self.parse_one_or_list(Self::parse_vector2fs)?,
-                    )),
-                    "bool" => param_set.bools.push(Param::new(
-                        var,
-                        pos,
-                        self.parse_one_or_list(Self::parse_bools)?,
-                    )),
-                    "string" => param_set.strings.push(Param::new(
-                        var,
-                        pos,
-                        self.parse_one_or_list(Self::parse_strings)?,
-                    )),
+                    "integer" => {
+                        self.next()?;
+                        param_set.ints.push(Param::new(
+                            var,
+                            pos,
+                            self.parse_one_or_list(Self::parse_ints)?,
+                        ))
+                    }
+                    "float" => {
+                        self.next()?;
+                        param_set.floats.push(Param::new(
+                            var,
+                            pos,
+                            self.parse_one_or_list(Self::parse_floats)?,
+                        ))
+                    }
+                    "point2" => {
+                        self.next()?;
+                        param_set.point2fs.push(Param::new(
+                            var,
+                            pos,
+                            self.parse_one_or_list(Self::parse_point2fs)?,
+                        ))
+                    }
+                    "vector2" => {
+                        self.next()?;
+                        param_set.vector2fs.push(Param::new(
+                            var,
+                            pos,
+                            self.parse_one_or_list(Self::parse_vector2fs)?,
+                        ))
+                    }
+                    "bool" => {
+                        self.next()?;
+                        param_set.bools.push(Param::new(
+                            var,
+                            pos,
+                            self.parse_one_or_list(Self::parse_bools)?,
+                        ))
+                    }
+                    "string" => {
+                        self.next()?;
+                        param_set.strings.push(Param::new(
+                            var,
+                            pos,
+                            self.parse_one_or_list(Self::parse_strings)?,
+                        ))
+                    }
                     _ => {
                         return Err(ParserError::Str(format!(
                             "{} parse_param_list(): expecting a type but got {}",
@@ -525,10 +553,10 @@ impl Parser {
                 }
                 Ok(())
             }
-            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
-                "{} parse_param_list(): expected string but got {:?}",
-                pos, ty
-            ))),
+            Ok(Token { pos, ty }) => {
+                // no param list, so don't error out
+                Ok(())
+            }
             Err(ParserError::Eof) => Err(ParserError::Str(
                 "parse_param_list(): EOF while processing param list".to_owned(),
             )),
@@ -852,11 +880,56 @@ impl Parser {
             ))),
         }
     }
+    fn parse_directives(&mut self) -> ParserResult<Vec<Directive>> {
+        let mut directives = vec![];
+        loop {
+            match self.peek()? {
+                Token {
+                    ty: TokenType::Identifier(ref s),
+                    ..
+                } => {
+                    if s == "AttributeEnd" || s == "TransformEnd" {
+                        return Ok(directives);
+                    } else {
+                        directives.push(self.parse_directive()?);
+                    }
+                }
+                Token { pos, ty } => {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_directives(): expected identifier or block close but got {:?}",
+                        pos, ty
+                    )));
+                }
+            }
+        }
+    }
+
+    fn parse_block(&mut self) -> ParserResult<Directive> {
+        let start_pos = self.pos()?;
+        match self.parse_identifier()?.as_ref() {
+            "AttributeBegin" => Ok(Directive::Attribute(BlockStruct {
+                pos: start_pos,
+                children: self.parse_directives()?,
+            })),
+            "TransformBegin" => Ok(Directive::Transform(BlockStruct {
+                pos: start_pos,
+                children: self.parse_directives()?,
+            })),
+            id => Err(ParserError::Str(format!(
+                "{} parse_block(): expected identifier or block start but got {:?}",
+                start_pos, id
+            ))),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::fs::File;
+    use std::io::prelude::*;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn test_tokenize_whitespace() {
@@ -1140,6 +1213,39 @@ mod tests {
                 ty: "sphere".to_owned(),
                 pos: Pos::new(1, 1),
                 param_set
+            }))
+        );
+    }
+
+    #[test]
+    fn test_parse_block() {
+        let parser_test_dir = Path::new(
+            &env::var("CARGO_MANIFEST_DIR").unwrap_or(r#"D:\projects\pbrtrs"#.to_owned()),
+        ).join("parser_tests");
+        let mut file = File::open(parser_test_dir.join("test1.pbrt")).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        let mut parser = Parser::new(&contents).unwrap();
+        assert_eq!(
+            parser.parse_block(),
+            Ok(Directive::Attribute(BlockStruct {
+                pos: Pos::new(1, 1),
+                children: vec![
+                    Directive::Material(DirectiveStruct {
+                        ty: "glass".to_owned(),
+                        pos: Pos::new(2, 5),
+                        param_set: ParamSet::default(),
+                    }),
+                    Directive::Shape(DirectiveStruct {
+                        ty: "sphere".to_owned(),
+                        pos: Pos::new(3, 5),
+                        param_set: ParamSet::default().add_float(Param::new(
+                            "radius",
+                            Pos::new(3, 20),
+                            vec![1.0],
+                        )),
+                    }),
+                ],
             }))
         );
     }

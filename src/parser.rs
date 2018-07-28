@@ -32,18 +32,19 @@ impl Token {
     }
 }
 
-pub struct Config {
-    before_transforms: Vec<Transform>,
-    after_transforms: Vec<Transform>,
-    transforms: Vec<Transform>,
-}
+// pub struct Config {
+//     before_transforms: Vec<Transform>,
+//     after_transforms: Vec<Transform>,
+//     transforms: Vec<Transform>,
+// }
 
-pub enum Transform {
-    Identity,
-    Translate(f64, f64, f64),
-    Scale(f64, f64, f64),
-}
+// pub enum Transform {
+//     Identity,
+//     Translate(f64, f64, f64),
+//     Scale(f64, f64, f64),
+// }
 
+#[derive(Debug, PartialEq)]
 pub struct ParamSet {
     pub bools: Vec<Param<bool>>,
     pub ints: Vec<Param<isize>>,
@@ -76,16 +77,39 @@ impl Default for ParamSet {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Directive {
+    Material(DirectiveStruct),
+    Shape(DirectiveStruct),
+    Attribute(BlockStruct),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct DirectiveStruct {
+    ty: String,
+    pos: Pos,
+    param_set: ParamSet,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct BlockStruct {
+    ty: String,
+    pos: Pos,
+    children: Vec<Directive>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Param<T> {
     name: String,
+    pos: Pos,
     values: Vec<T>,
 }
 
 impl<T> Param<T> {
-    fn new(name: &str, values: Vec<T>) -> Self {
+    fn new(name: &str, pos: Pos, values: Vec<T>) -> Self {
         Param {
             name: name.to_owned(),
+            pos,
             values,
         }
     }
@@ -155,8 +179,8 @@ impl Tokenizer {
         Tokenizer {
             chars: input.replace("\r\n", "\n").chars().collect(),
             index: 0,
-            pos: Pos::new(0, 0),
-            prev_pos: Pos::new(0, 0),
+            pos: Pos::new(1, 1),
+            prev_pos: Pos::new(1, 1),
         }
     }
 
@@ -188,7 +212,7 @@ impl Tokenizer {
         let ch = self.chars[self.index];
         self.prev_pos = self.pos;
         self.pos = if ch == '\n' {
-            Pos::new(self.pos.r + 1, 0)
+            Pos::new(self.pos.r + 1, 1)
         } else {
             Pos::new(self.pos.r, self.pos.c + 1)
         };
@@ -462,18 +486,34 @@ impl Parser {
                 let ty = split_s[0];
                 let var = split_s[1];
                 match ty {
-                    "integer" => param_set
-                        .ints
-                        .push(Param::new(var, self.parse_one_or_list(Self::parse_ints)?)),
-                    "float" => param_set
-                        .floats
-                        .push(Param::new(var, self.parse_one_or_list(Self::parse_floats)?)),
+                    "integer" => param_set.ints.push(Param::new(
+                        var,
+                        pos,
+                        self.parse_one_or_list(Self::parse_ints)?,
+                    )),
+                    "float" => param_set.floats.push(Param::new(
+                        var,
+                        pos,
+                        self.parse_one_or_list(Self::parse_floats)?,
+                    )),
                     "point2" => param_set.point2fs.push(Param::new(
                         var,
-                        self.parse_one_or_list(Self::parse_point2s)?,
+                        pos,
+                        self.parse_one_or_list(Self::parse_point2fs)?,
+                    )),
+                    "vector2" => param_set.vector2fs.push(Param::new(
+                        var,
+                        pos,
+                        self.parse_one_or_list(Self::parse_vector2fs)?,
+                    )),
+                    "bool" => param_set.bools.push(Param::new(
+                        var,
+                        pos,
+                        self.parse_one_or_list(Self::parse_bools)?,
                     )),
                     "string" => param_set.strings.push(Param::new(
                         var,
+                        pos,
                         self.parse_one_or_list(Self::parse_strings)?,
                     )),
                     _ => {
@@ -526,6 +566,23 @@ impl Parser {
                 "{} parse_list(): expected '[' but got {:?}",
                 pos, ty
             ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_list(): EOF while processing list".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn parse_one_or_list<T>(
+        &mut self,
+        parser: fn(&mut Self) -> ParserResult<Vec<T>>,
+    ) -> ParserResult<Vec<T>> {
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::LBracket,
+                ..
+            }) => self.parse_list(parser),
+            Ok(_) => parser(self),
             Err(ParserError::Eof) => Err(ParserError::Str(
                 "parse_list(): EOF while processing list".to_owned(),
             )),
@@ -603,18 +660,41 @@ impl Parser {
         }
     }
 
-    fn parse_one_or_list<T>(
-        &mut self,
-        parser: fn(&mut Self) -> ParserResult<Vec<T>>,
-    ) -> ParserResult<Vec<T>> {
+    fn parse_string(&mut self) -> ParserResult<String> {
         match self.peek() {
             Ok(Token {
-                ty: TokenType::LBracket,
+                ty: TokenType::Str(s),
                 ..
-            }) => self.parse_list(parser),
-            Ok(_) => parser(self),
+            }) => {
+                let _ = self.next();
+                Ok(s)
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{} parse_string(): expected string but got {:?}",
+                pos, ty
+            ))),
             Err(ParserError::Eof) => Err(ParserError::Str(
-                "parse_list(): EOF while processing list".to_owned(),
+                "parse_string(): EOF while processing string".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn parse_identifier(&mut self) -> ParserResult<String> {
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::Identifier(id),
+                ..
+            }) => {
+                let _ = self.next();
+                Ok(id)
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{} parse_identifier(): expected identifier but got {:?}",
+                pos, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_identifier(): EOF while processing identifier".to_owned(),
             )),
             Err(err) => Err(err),
         }
@@ -709,13 +789,13 @@ impl Parser {
         }
     }
 
-    fn parse_point2s(&mut self) -> ParserResult<Vec<Point2f>> {
+    fn parse_point2fs(&mut self) -> ParserResult<Vec<Point2f>> {
         let start_pos = self.pos()?;
         let floats = self.parse_floats()?;
         // parse_floats() errors out if there are no floats, so we're guaranteed at least one float here
         if floats.len() % 2 != 0 {
             return Err(ParserError::Str(format!(
-                "{} parse_point2s(): expected an even number of floats but got {}",
+                "{} parse_point2fs(): expected an even number of floats but got {}",
                 start_pos,
                 floats.len()
             )));
@@ -724,6 +804,53 @@ impl Parser {
             .chunks(2)
             .map(|fs| Point2f::new(fs[0], fs[1]))
             .collect())
+    }
+
+    fn parse_vector2fs(&mut self) -> ParserResult<Vec<Vector2f>> {
+        let start_pos = self.pos()?;
+        let floats = self.parse_floats()?;
+        // parse_floats() errors out if there are no floats, so we're guaranteed at least one float here
+        if floats.len() % 2 != 0 {
+            return Err(ParserError::Str(format!(
+                "{} parse_vector2fs(): expected an even number of floats but got {}",
+                start_pos,
+                floats.len()
+            )));
+        }
+        Ok(floats
+            .chunks(2)
+            .map(|fs| Vector2f::new(fs[0], fs[1]))
+            .collect())
+    }
+
+    fn parse_directive(&mut self) -> ParserResult<Directive> {
+        let start_pos = self.pos()?;
+        let id = self.parse_identifier()?;
+        let mut param_set = ParamSet::default();
+        match id.as_ref() {
+            "Material" => {
+                let ty = self.parse_string()?;
+                self.parse_param_list(&mut param_set)?;
+                Ok(Directive::Material(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            "Shape" => {
+                let ty = self.parse_string()?;
+                self.parse_param_list(&mut param_set)?;
+                Ok(Directive::Shape(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            _ => Err(ParserError::Str(format!(
+                "{} parse_directive(): unknown identifier {}",
+                start_pos, id
+            ))),
+        }
     }
 }
 
@@ -741,7 +868,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("  # comment\n123"),
             Ok(vec![Token {
-                pos: Pos::new(1, 0),
+                pos: Pos::new(2, 1),
                 ty: TokenType::Int(123),
             }])
         );
@@ -752,7 +879,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("123"),
             Ok(vec![Token {
-                pos: Pos::new(0, 0),
+                pos: Pos::new(1, 1),
                 ty: TokenType::Int(123),
             }])
         );
@@ -763,7 +890,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("-123"),
             Ok(vec![Token {
-                pos: Pos::new(0, 0),
+                pos: Pos::new(1, 1),
                 ty: TokenType::Int(-123),
             }])
         );
@@ -774,7 +901,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("-1.23"),
             Ok(vec![Token {
-                pos: Pos::new(0, 0),
+                pos: Pos::new(1, 1),
                 ty: TokenType::Float(-1.23),
             }])
         );
@@ -785,7 +912,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1.23"),
             Ok(vec![Token {
-                pos: Pos::new(0, 0),
+                pos: Pos::new(1, 1),
                 ty: TokenType::Float(1.23),
             }])
         );
@@ -796,7 +923,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1.23e12"),
             Ok(vec![Token {
-                pos: Pos::new(0, 0),
+                pos: Pos::new(1, 1),
                 ty: TokenType::Float(1.23 * f64::powf(10.0, 12.0)),
             }])
         );
@@ -807,7 +934,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1.23e-12"),
             Ok(vec![Token {
-                pos: Pos::new(0, 0),
+                pos: Pos::new(1, 1),
                 ty: TokenType::Float(1.23 * f64::powf(10.0, -12.0)),
             }])
         );
@@ -818,7 +945,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1e12"),
             Ok(vec![Token {
-                pos: Pos::new(0, 0),
+                pos: Pos::new(1, 1),
                 ty: TokenType::Int(isize::pow(10, 12)),
             }])
         );
@@ -829,7 +956,7 @@ mod tests {
         assert_eq!(
             Tokenizer::tokenize("1ed12"),
             Err(TokenizerError::Str(
-                "(0, 2) tokenize_num(): no number".to_owned()
+                "(1, 3) tokenize_num(): no number".to_owned()
             ))
         );
     }
@@ -840,27 +967,27 @@ mod tests {
             Tokenizer::tokenize("Accelerator \"kdtree\" \"float emptybonus\" [0.1]"),
             Ok(vec![
                 Token {
-                    pos: Pos::new(0, 0),
+                    pos: Pos::new(1, 1),
                     ty: TokenType::Identifier("Accelerator".to_owned()),
                 },
                 Token {
-                    pos: Pos::new(0, 12),
+                    pos: Pos::new(1, 13),
                     ty: TokenType::Str("kdtree".to_owned()),
                 },
                 Token {
-                    pos: Pos::new(0, 21),
+                    pos: Pos::new(1, 22),
                     ty: TokenType::Str("float emptybonus".to_owned()),
                 },
                 Token {
-                    pos: Pos::new(0, 40),
+                    pos: Pos::new(1, 41),
                     ty: TokenType::LBracket,
                 },
                 Token {
-                    pos: Pos::new(0, 41),
+                    pos: Pos::new(1, 42),
                     ty: TokenType::Float(0.1),
                 },
                 Token {
-                    pos: Pos::new(0, 44),
+                    pos: Pos::new(1, 45),
                     ty: TokenType::RBracket,
                 },
             ])
@@ -946,7 +1073,7 @@ mod tests {
     fn test_parse_one_point2() {
         let mut parser = Parser::new("1.0 2.0").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_point2s),
+            parser.parse_one_or_list(Parser::parse_point2fs),
             Ok(vec![Point2f::new(1.0, 2.0)])
         );
     }
@@ -955,7 +1082,7 @@ mod tests {
     fn test_parse_point2s() {
         let mut parser = Parser::new("[1 2.0 3 4 5 6]").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_point2s),
+            parser.parse_one_or_list(Parser::parse_point2fs),
             Ok(vec![
                 Point2f::new(1.0, 2.0),
                 Point2f::new(3.0, 4.0),
@@ -967,7 +1094,7 @@ mod tests {
     #[test]
     fn test_parse_point2s_err() {
         let mut parser = Parser::new("[1 2.0 3]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_point2s).is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_point2fs).is_err());
     }
 
     #[test]
@@ -975,7 +1102,10 @@ mod tests {
         let mut parser = Parser::new(r#""float fov" [30]"#).unwrap();
         let mut param_set = ParamSet::default();
         assert_eq!(parser.parse_param_list(&mut param_set), Ok(()));
-        assert_eq!(param_set.floats, vec![Param::new("fov", vec![30.0])]);
+        assert_eq!(
+            param_set.floats,
+            vec![Param::new("fov", Pos::new(1, 1), vec![30.0])]
+        );
     }
 
     #[test]
@@ -987,12 +1117,30 @@ mod tests {
             param_set.point2fs,
             vec![Param::new(
                 "points",
+                Pos::new(1, 1),
                 vec![
                     Point2f::new(1.0, 2.0),
                     Point2f::new(3.0, 4.0),
                     Point2f::new(5.0, 6.0),
                 ],
             )]
+        );
+    }
+
+    #[test]
+    fn test_parse_directive() {
+        let mut parser = Parser::new(r#"Shape "sphere" "float radius" 1"#).unwrap();
+        let mut param_set = ParamSet::default();
+        param_set
+            .floats
+            .push(Param::new("radius", Pos::new(1, 16), vec![1.0]));
+        assert_eq!(
+            parser.parse_directive(),
+            Ok(Directive::Shape(DirectiveStruct {
+                ty: "sphere".to_owned(),
+                pos: Pos::new(1, 1),
+                param_set
+            }))
         );
     }
 }

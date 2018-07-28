@@ -1,5 +1,6 @@
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
+use types::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 struct Pos {
@@ -43,19 +44,51 @@ pub enum Transform {
     Scale(f64, f64, f64),
 }
 
+pub struct ParamSet {
+    pub bools: Vec<Param<bool>>,
+    pub ints: Vec<Param<isize>>,
+    pub floats: Vec<Param<f64>>,
+    pub point2fs: Vec<Param<Point2f>>,
+    pub vector2fs: Vec<Param<Vector2f>>,
+    pub point3fs: Vec<Param<Point3f>>,
+    pub vector3fs: Vec<Param<Vector3f>>,
+    pub normals: Vec<Param<Normal3f>>,
+    pub spectra: Vec<Param<Spectrum>>,
+    pub strings: Vec<Param<String>>,
+    pub textures: Vec<Param<String>>,
+}
+
+impl Default for ParamSet {
+    fn default() -> Self {
+        ParamSet {
+            bools: vec![],
+            ints: vec![],
+            floats: vec![],
+            point2fs: vec![],
+            vector2fs: vec![],
+            point3fs: vec![],
+            vector3fs: vec![],
+            normals: vec![],
+            spectra: vec![],
+            strings: vec![],
+            textures: vec![],
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct Param<T> {
     name: String,
     values: Vec<T>,
 }
 
-pub enum ParamType {
-    Bool,
-    Int,
-    Float,
-    Point2,
-    Point3,
-    Vector3,
-    Normal3,
+impl<T> Param<T> {
+    fn new(name: &str, values: Vec<T>) -> Self {
+        Param {
+            name: name.to_owned(),
+            values,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -405,56 +438,61 @@ impl Parser {
         self.index >= self.tokens.len()
     }
 
-    // fn parse_param(&mut self) -> ParserResult<Param> {
-    //     match self.peek() {
-    //         Ok(Token { pos, ty: TokenType::Str(s) }) => {
-    //             let split = s.split_whitespace();
-    //             if split.len() != 2 {
-    //                 return Err(ParserError::Str(format!("({}, {}) parse_param(): expecting two words in string, got {}", pos.0, pos.1, s)));
-    //             }
-    //             match split[0].as_ref() {
-    //                 "int" =>
-    //             }
-    //         }
-    //         Ok(tok) => Err(ParserError::Str(format!("({}, {}) parse_param(): expecting string, got {:?}", tok.pos.0, tok.pos.1, tok))),
-    //         Err(ParserError::Eof) =>
-    //                 Err(ParserError::Str("tokenize_str(): EOF while processing string".to_owned())),
-    //         Err(err) => Err(err),
-    //     }
-    // }
+    fn pos(&self) -> ParserResult<Pos> {
+        if self.index >= self.tokens.len() {
+            Err(ParserError::Eof)
+        } else {
+            Ok(self.tokens[self.index].pos)
+        }
+    }
 
-    fn parse_ints(&mut self) -> ParserResult<Vec<isize>> {
-        let mut values = vec![];
-        loop {
-            match self.peek() {
-                Ok(Token {
-                    ty: TokenType::Int(i),
-                    ..
-                }) => {
-                    values.push(i);
-                    let _ = self.next();
+    fn parse_param_list(&mut self, param_set: &mut ParamSet) -> ParserResult<()> {
+        match self.next() {
+            Ok(Token {
+                pos,
+                ty: TokenType::Str(s),
+            }) => {
+                let split_s: Vec<&str> = s.split_whitespace().collect();
+                if split_s.len() != 2 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_param_list(): expecting a string with two arguments but got {}",
+                        pos, s
+                    )));
                 }
-                Ok(Token { pos, ty }) => {
-                    if values.is_empty() {
+                let ty = split_s[0];
+                let var = split_s[1];
+                match ty {
+                    "integer" => param_set
+                        .ints
+                        .push(Param::new(var, self.parse_one_or_list(Self::parse_ints)?)),
+                    "float" => param_set
+                        .floats
+                        .push(Param::new(var, self.parse_one_or_list(Self::parse_floats)?)),
+                    "point2" => param_set.point2fs.push(Param::new(
+                        var,
+                        self.parse_one_or_list(Self::parse_point2s)?,
+                    )),
+                    "string" => param_set.strings.push(Param::new(
+                        var,
+                        self.parse_one_or_list(Self::parse_strings)?,
+                    )),
+                    _ => {
                         return Err(ParserError::Str(format!(
-                            "{} parse_ints(): expected int but got {:?}",
+                            "{} parse_param_list(): expecting a type but got {}",
                             pos, ty
-                        )));
-                    } else {
-                        return Ok(values);
+                        )))
                     }
                 }
-                Err(ParserError::Eof) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(
-                            "parse_ints(): EOF while processing ints".to_owned(),
-                        ));
-                    } else {
-                        return Ok(values);
-                    }
-                }
-                Err(err) => return Err(err),
+                Ok(())
             }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{} parse_param_list(): expected string but got {:?}",
+                pos, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_param_list(): EOF while processing param list".to_owned(),
+            )),
+            Err(err) => Err(err),
         }
     }
 
@@ -492,6 +530,76 @@ impl Parser {
                 "parse_list(): EOF while processing list".to_owned(),
             )),
             Err(err) => Err(err),
+        }
+    }
+
+    fn parse_ints(&mut self) -> ParserResult<Vec<isize>> {
+        let mut values = vec![];
+        loop {
+            match self.peek() {
+                Ok(Token {
+                    ty: TokenType::Int(i),
+                    ..
+                }) => {
+                    values.push(i);
+                    let _ = self.next();
+                }
+                Ok(Token { pos, ty }) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(format!(
+                            "{} parse_ints(): expected int but got {:?}",
+                            pos, ty
+                        )));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(ParserError::Eof) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(
+                            "parse_ints(): EOF while processing ints".to_owned(),
+                        ));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    fn parse_strings(&mut self) -> ParserResult<Vec<String>> {
+        let mut values = vec![];
+        loop {
+            match self.peek() {
+                Ok(Token {
+                    ty: TokenType::Str(s),
+                    ..
+                }) => {
+                    values.push(s);
+                    let _ = self.next();
+                }
+                Ok(Token { pos, ty }) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(format!(
+                            "{} parse_strings(): expected string but got {:?}",
+                            pos, ty
+                        )));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(ParserError::Eof) => {
+                    if values.is_empty() {
+                        return Err(ParserError::Str(
+                            "parse_strings(): EOF while processing strings".to_owned(),
+                        ));
+                    } else {
+                        return Ok(values);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
         }
     }
 
@@ -601,7 +709,22 @@ impl Parser {
         }
     }
 
-    // fn parse_point2s(&mut self)
+    fn parse_point2s(&mut self) -> ParserResult<Vec<Point2f>> {
+        let start_pos = self.pos()?;
+        let floats = self.parse_floats()?;
+        // parse_floats() errors out if there are no floats, so we're guaranteed at least one float here
+        if floats.len() % 2 != 0 {
+            return Err(ParserError::Str(format!(
+                "{} parse_point2s(): expected an even number of floats but got {}",
+                start_pos,
+                floats.len()
+            )));
+        }
+        Ok(floats
+            .chunks(2)
+            .map(|fs| Point2f::new(fs[0], fs[1]))
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -760,8 +883,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ints_err() {
+    fn test_parse_ints_err1() {
         let mut parser = Parser::new("[1 2 3.0]").unwrap();
+        assert!(parser.parse_one_or_list(Parser::parse_ints).is_err());
+    }
+
+    #[test]
+    fn test_parse_ints_err2() {
+        let mut parser = Parser::new("[]").unwrap();
         assert!(parser.parse_one_or_list(Parser::parse_ints).is_err());
     }
 
@@ -811,5 +940,59 @@ mod tests {
     fn test_parse_floats_err() {
         let mut parser = Parser::new("[1 test 2]").unwrap();
         assert!(parser.parse_one_or_list(Parser::parse_floats).is_err());
+    }
+
+    #[test]
+    fn test_parse_one_point2() {
+        let mut parser = Parser::new("1.0 2.0").unwrap();
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_point2s),
+            Ok(vec![Point2f::new(1.0, 2.0)])
+        );
+    }
+
+    #[test]
+    fn test_parse_point2s() {
+        let mut parser = Parser::new("[1 2.0 3 4 5 6]").unwrap();
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_point2s),
+            Ok(vec![
+                Point2f::new(1.0, 2.0),
+                Point2f::new(3.0, 4.0),
+                Point2f::new(5.0, 6.0),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_point2s_err() {
+        let mut parser = Parser::new("[1 2.0 3]").unwrap();
+        assert!(parser.parse_one_or_list(Parser::parse_point2s).is_err());
+    }
+
+    #[test]
+    fn test_parse_param_list1() {
+        let mut parser = Parser::new(r#""float fov" [30]"#).unwrap();
+        let mut param_set = ParamSet::default();
+        assert_eq!(parser.parse_param_list(&mut param_set), Ok(()));
+        assert_eq!(param_set.floats, vec![Param::new("fov", vec![30.0])]);
+    }
+
+    #[test]
+    fn test_parse_param_list2() {
+        let mut parser = Parser::new(r#""point2 points" [1 2 3 4 5 6]"#).unwrap();
+        let mut param_set = ParamSet::default();
+        assert_eq!(parser.parse_param_list(&mut param_set), Ok(()));
+        assert_eq!(
+            param_set.point2fs,
+            vec![Param::new(
+                "points",
+                vec![
+                    Point2f::new(1.0, 2.0),
+                    Point2f::new(3.0, 4.0),
+                    Point2f::new(5.0, 6.0),
+                ],
+            )]
+        );
     }
 }

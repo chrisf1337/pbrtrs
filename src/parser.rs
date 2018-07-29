@@ -93,6 +93,7 @@ pub enum Directive {
     Shape(DirectiveStruct),
     Attribute(BlockStruct),
     Transform(BlockStruct),
+    World(BlockStruct),
 }
 
 #[derive(Debug, PartialEq)]
@@ -874,6 +875,18 @@ impl Parser {
                     param_set,
                 }))
             }
+            "AttributeBegin" => Ok(Directive::Attribute(BlockStruct {
+                pos: start_pos,
+                children: self.parse_directives()?,
+            })),
+            "TransformBegin" => Ok(Directive::Transform(BlockStruct {
+                pos: start_pos,
+                children: self.parse_directives()?,
+            })),
+            "WorldBegin" => Ok(Directive::World(BlockStruct {
+                pos: start_pos,
+                children: self.parse_directives()?,
+            })),
             _ => Err(ParserError::Str(format!(
                 "{} parse_directive(): unknown identifier {}",
                 start_pos, id
@@ -888,7 +901,7 @@ impl Parser {
                     ty: TokenType::Identifier(ref s),
                     ..
                 } => {
-                    if s == "AttributeEnd" || s == "TransformEnd" {
+                    if s == "AttributeEnd" || s == "TransformEnd" || s == "WorldEnd" {
                         return Ok(directives);
                     } else {
                         directives.push(self.parse_directive()?);
@@ -901,24 +914,6 @@ impl Parser {
                     )));
                 }
             }
-        }
-    }
-
-    fn parse_block(&mut self) -> ParserResult<Directive> {
-        let start_pos = self.pos()?;
-        match self.parse_identifier()?.as_ref() {
-            "AttributeBegin" => Ok(Directive::Attribute(BlockStruct {
-                pos: start_pos,
-                children: self.parse_directives()?,
-            })),
-            "TransformBegin" => Ok(Directive::Transform(BlockStruct {
-                pos: start_pos,
-                children: self.parse_directives()?,
-            })),
-            id => Err(ParserError::Str(format!(
-                "{} parse_block(): expected identifier or block start but got {:?}",
-                start_pos, id
-            ))),
         }
     }
 }
@@ -1227,7 +1222,7 @@ mod tests {
         file.read_to_string(&mut contents).unwrap();
         let mut parser = Parser::new(&contents).unwrap();
         assert_eq!(
-            parser.parse_block(),
+            parser.parse_directives(),
             Ok(Directive::Attribute(BlockStruct {
                 pos: Pos::new(1, 1),
                 children: vec![

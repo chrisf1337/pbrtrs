@@ -63,7 +63,7 @@ pub enum PreDirective {
     Integrator(DirectiveStruct),
     Accelerator(DirectiveStruct),
 
-    Include(PathBuf),
+    Include(Pos, PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -135,7 +135,7 @@ pub enum Directive {
     Attribute(BlockStruct),
     Transform(BlockStruct),
     World(BlockStruct),
-    Include(PathBuf),
+    Include(Pos, PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -1006,6 +1006,10 @@ impl Parser {
                 pos: start_pos,
                 children: self.parse_directives()?,
             })),
+            "Include" => Ok(Directive::Include(
+                start_pos,
+                PathBuf::from(self.parse_string()?),
+            )),
             _ => Err(ParserError::Str(format!(
                 "{} parse_directive(): unknown identifier {}",
                 start_pos, id
@@ -1215,6 +1219,10 @@ impl Parser {
                     param_set,
                 }))
             }
+            "Include" => Ok(PreDirective::Include(
+                start_pos,
+                PathBuf::from(self.parse_string()?),
+            )),
             id => Err(ParserError::Str(format!(
                 "{} parse_predirective(): Unknown predirective: {}",
                 start_pos, id
@@ -1667,7 +1675,7 @@ mod tests {
     #[test]
     fn test_parse_block() {
         let parser_test_dir = Path::new(
-            &env::var("CARGO_MANIFEST_DIR").unwrap_or(r#"D:\projects\pbrtrs"#.to_owned()),
+            &env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| r#"D:\projects\pbrtrs"#.to_owned()),
         ).join("parser_tests");
         let mut file = File::open(parser_test_dir.join("block.pbrt")).unwrap();
         let mut contents = String::new();
@@ -1703,7 +1711,7 @@ mod tests {
     #[test]
     fn test_parse1() {
         let parser_test_dir = Path::new(
-            &env::var("CARGO_MANIFEST_DIR").unwrap_or(r#"D:\projects\pbrtrs"#.to_owned()),
+            &env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| r#"D:\projects\pbrtrs"#.to_owned()),
         ).join("parser_tests");
         let mut file = File::open(parser_test_dir.join("test1.pbrt")).unwrap();
         let mut contents = String::new();
@@ -1712,50 +1720,51 @@ mod tests {
             Parser::parse(&contents),
             Ok((
                 vec![
+                    PreDirective::Include(Pos::new(1, 1), PathBuf::from("file1.pbrt")),
                     PreDirective::LookAt(
-                        Pos::new(1, 1),
+                        Pos::new(3, 1),
                         Matrix3f::new(3.0, 4.0, 1.5, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0),
                     ),
                     PreDirective::Camera(DirectiveStruct {
-                        pos: Pos::new(4, 1),
+                        pos: Pos::new(6, 1),
                         ty: "perspective".to_owned(),
                         param_set: ParamSet::default().add_floats(&[Param::new(
                             "fov",
-                            Pos::new(4, 22),
+                            Pos::new(6, 22),
                             vec![45.0],
                         )]),
                     }),
                     PreDirective::Sampler(DirectiveStruct {
-                        pos: Pos::new(6, 1),
+                        pos: Pos::new(8, 1),
                         ty: "halton".to_owned(),
                         param_set: ParamSet::default().add_ints(&[Param::new(
                             "pixelsamples",
-                            Pos::new(6, 18),
+                            Pos::new(8, 18),
                             vec![128],
                         )]),
                     }),
                     PreDirective::Integrator(DirectiveStruct {
-                        pos: Pos::new(7, 1),
+                        pos: Pos::new(9, 1),
                         ty: "path".to_owned(),
                         param_set: ParamSet::default(),
                     }),
                     PreDirective::Film(DirectiveStruct {
-                        pos: Pos::new(8, 1),
+                        pos: Pos::new(10, 1),
                         ty: "image".to_owned(),
                         param_set: ParamSet::default()
                             .add_strings(&[Param::new(
                                 "filename",
-                                Pos::new(8, 14),
+                                Pos::new(10, 14),
                                 vec!["simple.png".to_owned()],
                             )])
                             .add_ints(&[
-                                Param::new("xresolution", Pos::new(9, 6), vec![400]),
-                                Param::new("yresolution", Pos::new(9, 34), vec![400]),
+                                Param::new("xresolution", Pos::new(11, 6), vec![400]),
+                                Param::new("yresolution", Pos::new(11, 34), vec![400]),
                             ]),
                     }),
                 ],
                 Directive::World(BlockStruct {
-                    pos: Pos::new(11, 1),
+                    pos: Pos::new(13, 1),
                     children: vec![],
                 })
             ))

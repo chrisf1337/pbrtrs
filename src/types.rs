@@ -1,65 +1,11 @@
-#[derive(Debug, PartialEq)]
-pub struct Point2f {
-    x: f64,
-    y: f64,
-}
+use na::{Matrix3, Point2, Point3, Vector2, Vector3};
 
-impl Point2f {
-    pub fn new(x: f64, y: f64) -> Self {
-        Point2f { x, y }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Vector2f {
-    x: f64,
-    y: f64,
-}
-
-impl Vector2f {
-    pub fn new(x: f64, y: f64) -> Self {
-        Vector2f { x, y }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Point3f {
-    x: f64,
-    y: f64,
-    z: f64,
-}
-
-impl Point3f {
-    pub fn new(x: f64, y: f64, z: f64) -> Self {
-        Point3f { x, y, z }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Vector3f {
-    x: f64,
-    y: f64,
-    z: f64,
-}
-
-impl Vector3f {
-    pub fn new(x: f64, y: f64, z: f64) -> Self {
-        Vector3f { x, y, z }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Normal3f {
-    x: f64,
-    y: f64,
-    z: f64,
-}
-
-impl Normal3f {
-    pub fn new(x: f64, y: f64, z: f64) -> Self {
-        Normal3f { x, y, z }
-    }
-}
+pub type Point2f = Point2<f64>;
+pub type Point3f = Point3<f64>;
+pub type Vector2f = Vector2<f64>;
+pub type Vector3f = Vector3<f64>;
+pub type Normal3f = Vector3<f64>;
+pub type Matrix3f = Matrix3<f64>;
 
 #[derive(Debug, PartialEq)]
 pub struct Spectrum {}

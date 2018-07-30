@@ -3,7 +3,7 @@ use std::num::{ParseFloatError, ParseIntError};
 use types::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-struct Pos {
+pub struct Pos {
     r: usize,
     c: usize,
 }
@@ -38,11 +38,30 @@ impl Token {
 //     transforms: Vec<Transform>,
 // }
 
-// pub enum Transform {
-//     Identity,
-//     Translate(f64, f64, f64),
-//     Scale(f64, f64, f64),
-// }
+#[derive(Debug, PartialEq)]
+pub enum PreDirective {
+    // Transforms
+    Identity(Pos),
+    Translate(Pos, Vector3f),
+    Scale(Pos, Vector3f),
+    Rotate(Pos, f64, Vector3f),
+    LookAt(Pos, Matrix3f),
+    CoordinateSystem(Pos, String),
+    CoordSysTransform(Pos, String),
+    Transform(Pos, Matrix3f),
+    ConcatTransform(Pos, Matrix3f),
+    // Transform timing
+    ActiveTransform(Pos, String),
+    TransformTimes(Pos, f64, f64),
+
+    // Scene-wide options
+    Camera(DirectiveStruct),
+    Sampler(DirectiveStruct),
+    Film(DirectiveStruct),
+    Filter(DirectiveStruct),
+    Integrator(DirectiveStruct),
+    Accelerator(DirectiveStruct),
+}
 
 #[derive(Debug, PartialEq)]
 pub struct ParamSet {
@@ -78,10 +97,29 @@ impl Default for ParamSet {
 }
 
 impl ParamSet {
-    fn add_float(mut self, p: Param<f64>) -> Self {
+    #[cfg(test)]
+    fn add_floats(mut self, p: &[Param<f64>]) -> Self {
         {
             let this = &mut self;
-            this.floats.push(p);
+            this.floats.extend_from_slice(p);
+        }
+        self
+    }
+
+    #[cfg(test)]
+    fn add_ints(mut self, p: &[Param<isize>]) -> Self {
+        {
+            let this = &mut self;
+            this.ints.extend_from_slice(p);
+        }
+        self
+    }
+
+    #[cfg(test)]
+    fn add_strings(mut self, p: &[Param<String>]) -> Self {
+        {
+            let this = &mut self;
+            this.strings.extend_from_slice(p);
         }
         self
     }
@@ -109,7 +147,7 @@ pub struct BlockStruct {
     children: Vec<Directive>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Param<T> {
     name: String,
     pos: Pos,
@@ -162,6 +200,15 @@ pub enum TokenizerError {
 pub enum ParserError {
     Str(String),
     Eof,
+}
+
+impl fmt::Display for ParserError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParserError::Str(s) => write!(f, "{}", s),
+            ParserError::Eof => write!(f, "EOF"),
+        }
+    }
 }
 
 impl From<ParseIntError> for TokenizerError {
@@ -262,7 +309,7 @@ impl Tokenizer {
                 let _ = self.next();
                 tok
             }
-            Ok(c) if c == '-' || c == '+' || c.is_numeric() => self.tokenize_num(),
+            Ok(c) if c == '-' || c == '+' || c == '.' || c.is_numeric() => self.tokenize_num(),
             Ok(c) if c.is_whitespace() => {
                 while let Ok(ch) = self.peek() {
                     match ch {
@@ -481,6 +528,15 @@ impl Parser {
         }
     }
 
+    fn set_index(&mut self, index: usize) {
+        self.index = index;
+    }
+
+    fn parse_param_lists(&mut self, param_set: &mut ParamSet) -> ParserResult<()> {
+        while self.parse_param_list(param_set).is_ok() {}
+        Ok(())
+    }
+
     fn parse_param_list(&mut self, param_set: &mut ParamSet) -> ParserResult<()> {
         match self.peek() {
             Ok(Token {
@@ -502,7 +558,7 @@ impl Parser {
                         param_set.ints.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_ints)?,
+                            self.parse_one_or_list(Self::parse_int)?,
                         ))
                     }
                     "float" => {
@@ -510,7 +566,7 @@ impl Parser {
                         param_set.floats.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_floats)?,
+                            self.parse_one_or_list(Self::parse_float)?,
                         ))
                     }
                     "point2" => {
@@ -518,7 +574,7 @@ impl Parser {
                         param_set.point2fs.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_point2fs)?,
+                            self.parse_list(Self::parse_point2f)?,
                         ))
                     }
                     "vector2" => {
@@ -526,7 +582,7 @@ impl Parser {
                         param_set.vector2fs.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_vector2fs)?,
+                            self.parse_list(Self::parse_vector2f)?,
                         ))
                     }
                     "bool" => {
@@ -534,7 +590,7 @@ impl Parser {
                         param_set.bools.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_bools)?,
+                            self.parse_one_or_list(Self::parse_bool)?,
                         ))
                     }
                     "string" => {
@@ -542,7 +598,7 @@ impl Parser {
                         param_set.strings.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_strings)?,
+                            self.parse_one_or_list(Self::parse_string)?,
                         ))
                     }
                     _ => {
@@ -554,10 +610,10 @@ impl Parser {
                 }
                 Ok(())
             }
-            Ok(Token { pos, ty }) => {
-                // no param list, so don't error out
-                Ok(())
-            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{} parse_param_list(): expected param list, got {:?}",
+                pos, ty
+            ))),
             Err(ParserError::Eof) => Err(ParserError::Str(
                 "parse_param_list(): EOF while processing param list".to_owned(),
             )),
@@ -565,22 +621,32 @@ impl Parser {
         }
     }
 
-    fn parse_list<T>(
-        &mut self,
-        parser: fn(&mut Self) -> ParserResult<Vec<T>>,
-    ) -> ParserResult<Vec<T>> {
+    fn parse_list<T>(&mut self, parser: fn(&mut Self) -> ParserResult<T>) -> ParserResult<Vec<T>> {
         match self.peek() {
             Ok(Token {
                 ty: TokenType::LBracket,
-                ..
+                pos: start_pos,
             }) => {
                 let _ = self.next();
-                let values = parser(self)?;
+                let mut values = vec![];
+                while let Ok(elem) = parser(self) {
+                    values.push(elem);
+                }
                 match self.peek() {
                     Ok(Token {
                         ty: TokenType::RBracket,
                         ..
-                    }) => Ok(values),
+                    }) => {
+                        if values.is_empty() {
+                            Err(ParserError::Str(format!(
+                                "{} parse_list(): parsed empty list",
+                                start_pos,
+                            )))
+                        } else {
+                            self.next()?;
+                            Ok(values)
+                        }
+                    }
                     Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
                         "{} parse_list(): expected ']' but got {:?}",
                         pos, ty
@@ -604,14 +670,14 @@ impl Parser {
 
     fn parse_one_or_list<T>(
         &mut self,
-        parser: fn(&mut Self) -> ParserResult<Vec<T>>,
+        parser: fn(&mut Self) -> ParserResult<T>,
     ) -> ParserResult<Vec<T>> {
         match self.peek() {
             Ok(Token {
                 ty: TokenType::LBracket,
                 ..
             }) => self.parse_list(parser),
-            Ok(_) => parser(self),
+            Ok(_) => Ok(vec![parser(self)?]),
             Err(ParserError::Eof) => Err(ParserError::Str(
                 "parse_list(): EOF while processing list".to_owned(),
             )),
@@ -619,73 +685,23 @@ impl Parser {
         }
     }
 
-    fn parse_ints(&mut self) -> ParserResult<Vec<isize>> {
-        let mut values = vec![];
-        loop {
-            match self.peek() {
-                Ok(Token {
-                    ty: TokenType::Int(i),
-                    ..
-                }) => {
-                    values.push(i);
-                    let _ = self.next();
-                }
-                Ok(Token { pos, ty }) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(format!(
-                            "{} parse_ints(): expected int but got {:?}",
-                            pos, ty
-                        )));
-                    } else {
-                        return Ok(values);
-                    }
-                }
-                Err(ParserError::Eof) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(
-                            "parse_ints(): EOF while processing ints".to_owned(),
-                        ));
-                    } else {
-                        return Ok(values);
-                    }
-                }
-                Err(err) => return Err(err),
+    fn parse_int(&mut self) -> ParserResult<isize> {
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::Int(i),
+                ..
+            }) => {
+                let _ = self.next();
+                Ok(i)
             }
-        }
-    }
-
-    fn parse_strings(&mut self) -> ParserResult<Vec<String>> {
-        let mut values = vec![];
-        loop {
-            match self.peek() {
-                Ok(Token {
-                    ty: TokenType::Str(s),
-                    ..
-                }) => {
-                    values.push(s);
-                    let _ = self.next();
-                }
-                Ok(Token { pos, ty }) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(format!(
-                            "{} parse_strings(): expected string but got {:?}",
-                            pos, ty
-                        )));
-                    } else {
-                        return Ok(values);
-                    }
-                }
-                Err(ParserError::Eof) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(
-                            "parse_strings(): EOF while processing strings".to_owned(),
-                        ));
-                    } else {
-                        return Ok(values);
-                    }
-                }
-                Err(err) => return Err(err),
-            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{} parse_int(): expected int but got {:?}",
+                pos, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_int(): EOF while parsing int".to_owned(),
+            )),
+            Err(err) => Err(err),
         }
     }
 
@@ -729,127 +745,132 @@ impl Parser {
         }
     }
 
-    fn parse_bools(&mut self) -> ParserResult<Vec<bool>> {
-        let mut values = vec![];
-        loop {
-            match self.peek() {
-                Ok(Token {
-                    pos,
-                    ty: TokenType::Str(s),
-                }) => match s.as_ref() {
-                    "true" => {
-                        values.push(true);
-                        let _ = self.next();
-                    }
-                    "false" => {
-                        values.push(false);
-                        let _ = self.next();
-                    }
-                    _ => {
-                        return Err(ParserError::Str(format!(
-                            "{} parse_bools(): expected bool but got {:?}",
-                            pos, s
-                        )))
-                    }
-                },
-                Ok(Token { pos, ty }) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(format!(
-                            "{} parse_bools(): expected bool but got {:?}",
-                            pos, ty
-                        )));
-                    } else {
-                        return Ok(values);
-                    }
+    fn parse_bool(&mut self) -> ParserResult<bool> {
+        match self.peek() {
+            Ok(Token {
+                pos,
+                ty: TokenType::Str(s),
+            }) => match s.as_ref() {
+                "true" => {
+                    self.next()?;
+                    Ok(true)
                 }
-                Err(ParserError::Eof) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(
-                            "parse_bools(): EOF while processing bools".to_owned(),
-                        ));
-                    } else {
-                        return Ok(values);
-                    }
+                "false" => {
+                    self.next()?;
+                    Ok(false)
                 }
-                Err(err) => return Err(err),
+                _ => Err(ParserError::Str(format!(
+                    "{} parse_bool(): expected bool but got {:?}",
+                    pos, s
+                ))),
+            },
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{} parse_bool(): expected int but got {:?}",
+                pos, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_bool(): EOF while parsing bool".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn parse_float(&mut self) -> ParserResult<f64> {
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::Float(f),
+                ..
+            }) => {
+                self.next()?;
+                Ok(f)
             }
+            Ok(Token {
+                ty: TokenType::Int(i),
+                ..
+            }) => {
+                self.next()?;
+                Ok(i as f64)
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{} parse_float(): expected float but got {:?}",
+                pos, ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_float(): EOF while parsing float".to_owned(),
+            )),
+            Err(err) => Err(err),
         }
     }
 
     fn parse_floats(&mut self) -> ParserResult<Vec<f64>> {
+        self.parse_many(Self::parse_float, "float")
+    }
+
+    fn parse_many<T>(
+        &mut self,
+        parser: fn(&mut Self) -> ParserResult<T>,
+        name: &str,
+    ) -> ParserResult<Vec<T>> {
         let mut values = vec![];
         loop {
-            match self.peek() {
-                Ok(Token {
-                    ty: TokenType::Float(f),
-                    ..
-                }) => {
-                    values.push(f);
-                    let _ = self.next();
-                }
-                Ok(Token {
-                    ty: TokenType::Int(i),
-                    ..
-                }) => {
-                    values.push(i as f64);
-                    let _ = self.next();
-                }
-                Ok(Token { pos, ty }) => {
+            match parser(self) {
+                Ok(i) => values.push(i),
+                Err(err) => {
                     if values.is_empty() {
                         return Err(ParserError::Str(format!(
-                            "{} parse_floats(): expected float but got {:?}",
-                            pos, ty
+                            "parse_{name}s(): error while processing {name}s:\n  {}",
+                            err,
+                            name = name,
                         )));
                     } else {
                         return Ok(values);
                     }
                 }
-                Err(ParserError::Eof) => {
-                    if values.is_empty() {
-                        return Err(ParserError::Str(
-                            "parse_floats(): EOF while processing floats".to_owned(),
-                        ));
-                    } else {
-                        return Ok(values);
-                    }
-                }
-                Err(err) => return Err(err),
             }
         }
     }
 
-    fn parse_point2fs(&mut self) -> ParserResult<Vec<Point2f>> {
-        let start_pos = self.pos()?;
-        let floats = self.parse_floats()?;
-        // parse_floats() errors out if there are no floats, so we're guaranteed at least one float here
-        if floats.len() % 2 != 0 {
-            return Err(ParserError::Str(format!(
-                "{} parse_point2fs(): expected an even number of floats but got {}",
-                start_pos,
-                floats.len()
-            )));
+    fn parse_n<T>(
+        &mut self,
+        parser: fn(&mut Self) -> ParserResult<T>,
+        n: usize,
+        name: &str,
+    ) -> ParserResult<Vec<T>> {
+        assert!(n > 0);
+        let start_index = self.index;
+        let mut values = vec![];
+        for _ in 0..n {
+            match parser(self) {
+                Ok(i) => values.push(i),
+                Err(err) => {
+                    self.set_index(start_index);
+                    return Err(ParserError::Str(format!(
+                        "parse_n_{name}s(): error while processing {name}s:\n  {:?}",
+                        err,
+                        name = name,
+                    )));
+                }
+            }
         }
-        Ok(floats
-            .chunks(2)
-            .map(|fs| Point2f::new(fs[0], fs[1]))
-            .collect())
+        Ok(values)
     }
 
-    fn parse_vector2fs(&mut self) -> ParserResult<Vec<Vector2f>> {
-        let start_pos = self.pos()?;
-        let floats = self.parse_floats()?;
-        // parse_floats() errors out if there are no floats, so we're guaranteed at least one float here
-        if floats.len() % 2 != 0 {
-            return Err(ParserError::Str(format!(
-                "{} parse_vector2fs(): expected an even number of floats but got {}",
-                start_pos,
-                floats.len()
-            )));
-        }
-        Ok(floats
-            .chunks(2)
-            .map(|fs| Vector2f::new(fs[0], fs[1]))
-            .collect())
+    fn parse_point2f(&mut self) -> ParserResult<Point2f> {
+        let floats = self.parse_n(Self::parse_float, 2, "float")?;
+        Ok(Point2f::new(floats[0], floats[1]))
+    }
+
+    fn parse_vector2f(&mut self) -> ParserResult<Vector2f> {
+        let start_index = self.index;
+        let x = self.parse_float()?;
+        let y = match self.parse_float() {
+            Ok(f) => f,
+            Err(err) => {
+                self.set_index(start_index);
+                return Err(err);
+            }
+        };
+        Ok(Vector2f::new(x, y))
     }
 
     fn parse_directive(&mut self) -> ParserResult<Directive> {
@@ -859,7 +880,7 @@ impl Parser {
         match id.as_ref() {
             "Material" => {
                 let ty = self.parse_string()?;
-                self.parse_param_list(&mut param_set)?;
+                self.parse_param_lists(&mut param_set)?;
                 Ok(Directive::Material(DirectiveStruct {
                     ty,
                     pos: start_pos,
@@ -868,7 +889,7 @@ impl Parser {
             }
             "Shape" => {
                 let ty = self.parse_string()?;
-                self.parse_param_list(&mut param_set)?;
+                self.parse_param_lists(&mut param_set)?;
                 Ok(Directive::Shape(DirectiveStruct {
                     ty,
                     pos: start_pos,
@@ -893,6 +914,7 @@ impl Parser {
             ))),
         }
     }
+
     fn parse_directives(&mut self) -> ParserResult<Vec<Directive>> {
         let mut directives = vec![];
         loop {
@@ -916,6 +938,220 @@ impl Parser {
             }
         }
     }
+
+    fn parse_predirective(&mut self) -> ParserResult<PreDirective> {
+        let start_pos = self.pos()?;
+        let mut param_set = ParamSet::default();
+        match self.parse_identifier()?.as_ref() {
+            "Identity" => Ok(PreDirective::Identity(start_pos)),
+            "Translate" => {
+                let floats = self.parse_floats()?;
+                if floats.len() != 3 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirective(): Translate expects 3 floats but was given {}",
+                        start_pos,
+                        floats.len()
+                    )));
+                }
+                Ok(PreDirective::Translate(
+                    start_pos,
+                    Vector3f::new(floats[0], floats[1], floats[2]),
+                ))
+            }
+            "Scale" => {
+                let floats = self.parse_floats()?;
+                if floats.len() != 3 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirective(): Scale expects 3 floats but was given {}",
+                        start_pos,
+                        floats.len()
+                    )));
+                }
+                Ok(PreDirective::Scale(
+                    start_pos,
+                    Vector3f::new(floats[0], floats[1], floats[2]),
+                ))
+            }
+            "Rotate" => {
+                let floats = self.parse_floats()?;
+                if floats.len() != 4 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirective(): Rotate expects 4 floats but was given {}",
+                        start_pos,
+                        floats.len()
+                    )));
+                }
+                Ok(PreDirective::Rotate(
+                    start_pos,
+                    floats[0],
+                    Vector3f::new(floats[1], floats[2], floats[3]),
+                ))
+            }
+            "LookAt" => {
+                let floats = self.parse_floats()?;
+                if floats.len() != 9 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirective(): LookAt expects 9 floats but was given {}",
+                        start_pos,
+                        floats.len()
+                    )));
+                }
+                Ok(PreDirective::LookAt(
+                    start_pos,
+                    Matrix3f::new(
+                        floats[0], floats[1], floats[2], floats[3], floats[4], floats[5],
+                        floats[6], floats[7], floats[8],
+                    ),
+                ))
+            }
+            "CoordinateSystem" => {
+                let name = self.parse_string()?;
+                Ok(PreDirective::CoordinateSystem(start_pos, name))
+            }
+            "CoordSysTransform" => {
+                let name = self.parse_string()?;
+                Ok(PreDirective::CoordSysTransform(start_pos, name))
+            }
+            "Transform" => {
+                let floats = self.parse_floats()?;
+                if floats.len() != 9 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirective(): Transform expects 9 floats but was given {}",
+                        start_pos,
+                        floats.len()
+                    )));
+                }
+                Ok(PreDirective::Transform(
+                    start_pos,
+                    Matrix3f::new(
+                        floats[0], floats[1], floats[2], floats[3], floats[4], floats[5],
+                        floats[6], floats[7], floats[8],
+                    ),
+                ))
+            }
+            "ConcatTransform" => {
+                let floats = self.parse_floats()?;
+                if floats.len() != 9 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirective(): ConcatTransform expects 9 floats but was given {}",
+                        start_pos,
+                        floats.len()
+                    )));
+                }
+                Ok(PreDirective::ConcatTransform(
+                    start_pos,
+                    Matrix3f::new(
+                        floats[0], floats[1], floats[2], floats[3], floats[4], floats[5],
+                        floats[6], floats[7], floats[8],
+                    ),
+                ))
+            }
+            "ActiveTransform" => {
+                let id = self.parse_identifier()?;
+                Ok(PreDirective::ActiveTransform(start_pos, id))
+            }
+            "TransformTimes" => {
+                let floats = self.parse_floats()?;
+                if floats.len() != 2 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirective(): TransformTimes expects 2 floats but was given {}",
+                        start_pos,
+                        floats.len()
+                    )));
+                }
+                Ok(PreDirective::TransformTimes(
+                    start_pos, floats[0], floats[1],
+                ))
+            }
+            "Camera" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(PreDirective::Camera(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            "Sampler" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(PreDirective::Sampler(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            "Film" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(PreDirective::Film(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            "Filter" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(PreDirective::Filter(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            "Integrator" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(PreDirective::Integrator(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            "Accelerator" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(PreDirective::Accelerator(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            id => Err(ParserError::Str(format!(
+                "{} parse_predirective(): Unknown predirective: {}",
+                start_pos, id
+            ))),
+        }
+    }
+
+    fn parse_predirectives(&mut self) -> ParserResult<Vec<PreDirective>> {
+        let mut predirectives = vec![];
+        loop {
+            match self.peek()? {
+                Token {
+                    ty: TokenType::Identifier(ref s),
+                    ..
+                } => {
+                    if s == "WorldBegin" {
+                        return Ok(predirectives);
+                    } else {
+                        predirectives.push(self.parse_predirective()?);
+                    }
+                }
+                Token { pos, ty } => {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_predirectives(): expected predirective but got {:?}",
+                        pos, ty
+                    )));
+                }
+            }
+        }
+    }
+
+    pub fn parse(input: &str) -> ParserResult<(Vec<PreDirective>, Directive)> {
+        let mut parser = Parser::new(input)?;
+        Ok((parser.parse_predirectives()?, parser.parse_directive()?))
+    }
 }
 
 #[cfg(test)]
@@ -924,7 +1160,7 @@ mod tests {
     use std::env;
     use std::fs::File;
     use std::io::prelude::*;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn test_tokenize_whitespace() {
@@ -1065,14 +1301,14 @@ mod tests {
     #[test]
     fn test_parse_one_int() {
         let mut parser = Parser::new("1").unwrap();
-        assert_eq!(parser.parse_one_or_list(Parser::parse_ints), Ok(vec![1]));
+        assert_eq!(parser.parse_one_or_list(Parser::parse_int), Ok(vec![1]));
     }
 
     #[test]
     fn test_parse_ints() {
         let mut parser = Parser::new("[1 2 3]").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_ints),
+            parser.parse_one_or_list(Parser::parse_int),
             Ok(vec![1, 2, 3])
         );
     }
@@ -1080,29 +1316,26 @@ mod tests {
     #[test]
     fn test_parse_ints_err1() {
         let mut parser = Parser::new("[1 2 3.0]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_ints).is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_int).is_err());
     }
 
     #[test]
     fn test_parse_ints_err2() {
         let mut parser = Parser::new("[]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_ints).is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_int).is_err());
     }
 
     #[test]
     fn test_parse_one_bool() {
         let mut parser = Parser::new(r#"["true"]"#).unwrap();
-        assert_eq!(
-            parser.parse_one_or_list(Parser::parse_bools),
-            Ok(vec![true])
-        );
+        assert_eq!(parser.parse_one_or_list(Parser::parse_bool), Ok(vec![true]));
     }
 
     #[test]
     fn test_parse_bools() {
         let mut parser = Parser::new(r#"["true" "false" "true"]"#).unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_bools),
+            parser.parse_one_or_list(Parser::parse_bool),
             Ok(vec![true, false, true])
         );
     }
@@ -1110,23 +1343,20 @@ mod tests {
     #[test]
     fn test_parse_bools_err() {
         let mut parser = Parser::new(r#"["true" "false" 3.0]"#).unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_bools).is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_bool).is_err());
     }
 
     #[test]
     fn test_parse_one_float() {
         let mut parser = Parser::new("1.0").unwrap();
-        assert_eq!(
-            parser.parse_one_or_list(Parser::parse_floats),
-            Ok(vec![1.0])
-        );
+        assert_eq!(parser.parse_one_or_list(Parser::parse_float), Ok(vec![1.0]));
     }
 
     #[test]
     fn test_parse_floats() {
         let mut parser = Parser::new("[1 2.0 3]").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_floats),
+            parser.parse_one_or_list(Parser::parse_float),
             Ok(vec![1.0, 2.0, 3.0])
         );
     }
@@ -1134,14 +1364,14 @@ mod tests {
     #[test]
     fn test_parse_floats_err() {
         let mut parser = Parser::new("[1 test 2]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_floats).is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_float).is_err());
     }
 
     #[test]
     fn test_parse_one_point2() {
         let mut parser = Parser::new("1.0 2.0").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_point2fs),
+            parser.parse_one_or_list(Parser::parse_point2f),
             Ok(vec![Point2f::new(1.0, 2.0)])
         );
     }
@@ -1150,7 +1380,7 @@ mod tests {
     fn test_parse_point2s() {
         let mut parser = Parser::new("[1 2.0 3 4 5 6]").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_point2fs),
+            parser.parse_one_or_list(Parser::parse_point2f),
             Ok(vec![
                 Point2f::new(1.0, 2.0),
                 Point2f::new(3.0, 4.0),
@@ -1162,7 +1392,9 @@ mod tests {
     #[test]
     fn test_parse_point2s_err() {
         let mut parser = Parser::new("[1 2.0 3]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_point2fs).is_err());
+        let res = parser.parse_one_or_list(Parser::parse_point2f);
+        println!("{:?}", res);
+        assert!(res.is_err());
     }
 
     #[test]
@@ -1213,35 +1445,112 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_transform() {
+        let mut parser = Parser::new(r#"Translate 1 0 0"#).unwrap();
+        assert_eq!(
+            parser.parse_predirective(),
+            Ok(PreDirective::Translate(
+                Pos::new(1, 1),
+                Vector3f::new(1.0, 0.0, 0.0)
+            ))
+        );
+    }
+
+    #[test]
     fn test_parse_block() {
+        let parser_test_dir = Path::new(
+            &env::var("CARGO_MANIFEST_DIR").unwrap_or(r#"D:\projects\pbrtrs"#.to_owned()),
+        ).join("parser_tests");
+        let mut file = File::open(parser_test_dir.join("block.pbrt")).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        let mut parser = Parser::new(&contents).unwrap();
+        assert_eq!(
+            parser.parse_directive(),
+            Ok(Directive::World(BlockStruct {
+                pos: Pos::new(1, 1),
+                children: vec![Directive::Attribute(BlockStruct {
+                    pos: Pos::new(2, 5),
+                    children: vec![
+                        Directive::Material(DirectiveStruct {
+                            ty: "glass".to_owned(),
+                            pos: Pos::new(3, 9),
+                            param_set: ParamSet::default(),
+                        }),
+                        Directive::Shape(DirectiveStruct {
+                            ty: "sphere".to_owned(),
+                            pos: Pos::new(4, 9),
+                            param_set: ParamSet::default().add_floats(&[Param::new(
+                                "radius",
+                                Pos::new(4, 24),
+                                vec![1.0],
+                            )]),
+                        }),
+                    ],
+                })],
+            }))
+        );
+    }
+
+    #[test]
+    fn test_parse1() {
         let parser_test_dir = Path::new(
             &env::var("CARGO_MANIFEST_DIR").unwrap_or(r#"D:\projects\pbrtrs"#.to_owned()),
         ).join("parser_tests");
         let mut file = File::open(parser_test_dir.join("test1.pbrt")).unwrap();
         let mut contents = String::new();
         file.read_to_string(&mut contents).unwrap();
-        let mut parser = Parser::new(&contents).unwrap();
         assert_eq!(
-            parser.parse_directives(),
-            Ok(Directive::Attribute(BlockStruct {
-                pos: Pos::new(1, 1),
-                children: vec![
-                    Directive::Material(DirectiveStruct {
-                        ty: "glass".to_owned(),
-                        pos: Pos::new(2, 5),
+            Parser::parse(&contents),
+            Ok((
+                vec![
+                    PreDirective::LookAt(
+                        Pos::new(1, 1),
+                        Matrix3f::new(3.0, 4.0, 1.5, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0),
+                    ),
+                    PreDirective::Camera(DirectiveStruct {
+                        pos: Pos::new(4, 1),
+                        ty: "perspective".to_owned(),
+                        param_set: ParamSet::default().add_floats(&[Param::new(
+                            "fov",
+                            Pos::new(4, 22),
+                            vec![45.0],
+                        )]),
+                    }),
+                    PreDirective::Sampler(DirectiveStruct {
+                        pos: Pos::new(6, 1),
+                        ty: "halton".to_owned(),
+                        param_set: ParamSet::default().add_ints(&[Param::new(
+                            "pixelsamples",
+                            Pos::new(6, 18),
+                            vec![128],
+                        )]),
+                    }),
+                    PreDirective::Integrator(DirectiveStruct {
+                        pos: Pos::new(7, 1),
+                        ty: "path".to_owned(),
                         param_set: ParamSet::default(),
                     }),
-                    Directive::Shape(DirectiveStruct {
-                        ty: "sphere".to_owned(),
-                        pos: Pos::new(3, 5),
-                        param_set: ParamSet::default().add_float(Param::new(
-                            "radius",
-                            Pos::new(3, 20),
-                            vec![1.0],
-                        )),
+                    PreDirective::Film(DirectiveStruct {
+                        pos: Pos::new(8, 1),
+                        ty: "image".to_owned(),
+                        param_set: ParamSet::default()
+                            .add_strings(&[Param::new(
+                                "filename",
+                                Pos::new(8, 14),
+                                vec!["simple.png".to_owned()],
+                            )])
+                            .add_ints(&[
+                                Param::new("xresolution", Pos::new(9, 6), vec![400]),
+                                Param::new("yresolution", Pos::new(9, 34), vec![400]),
+                            ]),
                     }),
                 ],
-            }))
+                Directive::World(BlockStruct {
+                    pos: Pos::new(11, 1),
+                    children: vec![],
+                })
+            ))
         );
     }
 }

@@ -1,4 +1,6 @@
-AttributeBegin
-    Material "glass"
-    Shape "sphere" "float radius" 1
-AttributeEnd
+WorldBegin
+    AttributeBegin
+        Material "glass"
+        Shape "sphere" "float radius" 1
+    AttributeEnd
+WorldEnd

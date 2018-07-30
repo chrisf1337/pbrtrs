@@ -1,5 +1,6 @@
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
+use std::path::PathBuf;
 use types::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -61,6 +62,8 @@ pub enum PreDirective {
     Filter(DirectiveStruct),
     Integrator(DirectiveStruct),
     Accelerator(DirectiveStruct),
+
+    Include(PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -132,6 +135,7 @@ pub enum Directive {
     Attribute(BlockStruct),
     Transform(BlockStruct),
     World(BlockStruct),
+    Include(PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -558,48 +562,81 @@ impl Parser {
                         param_set.ints.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_int)?,
-                        ))
+                            self.parse_one_or_list(Self::parse_int, "int")?,
+                        ));
                     }
                     "float" => {
                         self.next()?;
                         param_set.floats.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_float)?,
-                        ))
+                            self.parse_one_or_list(Self::parse_float, "float")?,
+                        ));
                     }
                     "point2" => {
                         self.next()?;
                         param_set.point2fs.push(Param::new(
                             var,
                             pos,
-                            self.parse_list(Self::parse_point2f)?,
-                        ))
+                            self.parse_list(Self::parse_point2f, "point2f")?,
+                        ));
                     }
                     "vector2" => {
                         self.next()?;
                         param_set.vector2fs.push(Param::new(
                             var,
                             pos,
-                            self.parse_list(Self::parse_vector2f)?,
-                        ))
+                            self.parse_list(Self::parse_vector2f, "vector2f")?,
+                        ));
                     }
                     "bool" => {
                         self.next()?;
                         param_set.bools.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_bool)?,
-                        ))
+                            self.parse_one_or_list(Self::parse_bool, "bool")?,
+                        ));
                     }
                     "string" => {
                         self.next()?;
                         param_set.strings.push(Param::new(
                             var,
                             pos,
-                            self.parse_one_or_list(Self::parse_string)?,
-                        ))
+                            self.parse_one_or_list(Self::parse_string, "string")?,
+                        ));
+                    }
+                    "rgb" => {
+                        self.next()?;
+                        let rgb = self.parse_list_of_n(Self::parse_float, 3, "float")?;
+                        param_set.spectra.push(Param::new(
+                            var,
+                            pos,
+                            vec![Spectrum::Rgb(rgb[0], rgb[1], rgb[2])],
+                        ));
+                    }
+                    "xyz" => {
+                        self.next()?;
+                        let rgb = self.parse_list_of_n(Self::parse_float, 3, "float")?;
+                        param_set.spectra.push(Param::new(
+                            var,
+                            pos,
+                            vec![Spectrum::Xyz(rgb[0], rgb[1], rgb[2])],
+                        ));
+                    }
+                    "spectrum" => {
+                        self.next()?;
+                        param_set
+                            .spectra
+                            .push(Param::new(var, pos, vec![self.parse_spectrum()?]));
+                    }
+                    "blackbody" => {
+                        self.next()?;
+                        let rgb = self.parse_list_of_n(Self::parse_float, 2, "float")?;
+                        param_set.spectra.push(Param::new(
+                            var,
+                            pos,
+                            vec![Spectrum::Blackbody(rgb[0], rgb[1])],
+                        ));
                     }
                     _ => {
                         return Err(ParserError::Str(format!(
@@ -621,17 +658,19 @@ impl Parser {
         }
     }
 
-    fn parse_list<T>(&mut self, parser: fn(&mut Self) -> ParserResult<T>) -> ParserResult<Vec<T>> {
+    /// Returns error if list is empty
+    fn parse_list<T>(
+        &mut self,
+        parser: fn(&mut Self) -> ParserResult<T>,
+        name: &str,
+    ) -> ParserResult<Vec<T>> {
         match self.peek() {
             Ok(Token {
                 ty: TokenType::LBracket,
                 pos: start_pos,
             }) => {
                 let _ = self.next();
-                let mut values = vec![];
-                while let Ok(elem) = parser(self) {
-                    values.push(elem);
-                }
+                let values = self.parse_many(parser, name)?;
                 match self.peek() {
                     Ok(Token {
                         ty: TokenType::RBracket,
@@ -639,8 +678,8 @@ impl Parser {
                     }) => {
                         if values.is_empty() {
                             Err(ParserError::Str(format!(
-                                "{} parse_list(): parsed empty list",
-                                start_pos,
+                                "{} parse_list_{}(): parsed empty list",
+                                start_pos, name,
                             )))
                         } else {
                             self.next()?;
@@ -648,22 +687,86 @@ impl Parser {
                         }
                     }
                     Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
-                        "{} parse_list(): expected ']' but got {:?}",
-                        pos, ty
+                        "{pos} parse_list_{name}(): expected ']' but got {ty:?}",
+                        pos = pos,
+                        name = name,
+                        ty = ty
                     ))),
-                    Err(ParserError::Eof) => Err(ParserError::Str(
-                        "parse_list(): EOF while processing list".to_owned(),
-                    )),
+                    Err(ParserError::Eof) => Err(ParserError::Str(format!(
+                        "parse_list_{}(): EOF while processing list",
+                        name
+                    ))),
                     Err(err) => Err(err),
                 }
             }
             Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
-                "{} parse_list(): expected '[' but got {:?}",
-                pos, ty
+                "{pos} parse_list_{name}(): expected '[' but got {ty:?}",
+                name = name,
+                pos = pos,
+                ty = ty
             ))),
-            Err(ParserError::Eof) => Err(ParserError::Str(
-                "parse_list(): EOF while processing list".to_owned(),
-            )),
+            Err(ParserError::Eof) => Err(ParserError::Str(format!(
+                "parse_list_{}(): EOF while processing list",
+                name
+            ))),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn parse_list_of_n<T>(
+        &mut self,
+        parser: fn(&mut Self) -> ParserResult<T>,
+        n: usize,
+        name: &str,
+    ) -> ParserResult<Vec<T>> {
+        match self.peek() {
+            Ok(Token {
+                ty: TokenType::LBracket,
+                pos: start_pos,
+            }) => {
+                let _ = self.next();
+                let values = self.parse_n(parser, n, name)?;
+                match self.peek() {
+                    Ok(Token {
+                        ty: TokenType::RBracket,
+                        ..
+                    }) => {
+                        if values.is_empty() {
+                            Err(ParserError::Str(format!(
+                                "{pos} parse_list_of_{n}_{name}s(): parsed empty list",
+                                name = name,
+                                n = n,
+                                pos = start_pos,
+                            )))
+                        } else {
+                            self.next()?;
+                            Ok(values)
+                        }
+                    }
+                    Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                        "{pos} parse_list_of_{n}_{name}s(): expected ']' but got {ty:?}",
+                        name = name,
+                        n = n,
+                        pos = pos,
+                        ty = ty
+                    ))),
+                    Err(ParserError::Eof) => Err(ParserError::Str(format!(
+                        "parse_list_of_n_{}s(): EOF while processing list",
+                        name
+                    ))),
+                    Err(err) => Err(err),
+                }
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{pos} parse_list_of_n_{name}s(): expected '[' but got {ty:?}",
+                name = name,
+                pos = pos,
+                ty = ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(format!(
+                "parse_list_of_n_{}(): EOF while processing list",
+                name
+            ))),
             Err(err) => Err(err),
         }
     }
@@ -671,16 +774,18 @@ impl Parser {
     fn parse_one_or_list<T>(
         &mut self,
         parser: fn(&mut Self) -> ParserResult<T>,
+        name: &str,
     ) -> ParserResult<Vec<T>> {
         match self.peek() {
             Ok(Token {
                 ty: TokenType::LBracket,
                 ..
-            }) => self.parse_list(parser),
+            }) => self.parse_list(parser, name),
             Ok(_) => Ok(vec![parser(self)?]),
-            Err(ParserError::Eof) => Err(ParserError::Str(
-                "parse_list(): EOF while processing list".to_owned(),
-            )),
+            Err(ParserError::Eof) => Err(ParserError::Str(format!(
+                "parse_one_or_list_{}(): EOF while processing list",
+                name
+            ))),
             Err(err) => Err(err),
         }
     }
@@ -818,7 +923,7 @@ impl Parser {
                 Err(err) => {
                     if values.is_empty() {
                         return Err(ParserError::Str(format!(
-                            "parse_{name}s(): error while processing {name}s:\n  {}",
+                            "parse_many_{name}s(): error while processing {name}s:\n  {}",
                             err,
                             name = name,
                         )));
@@ -845,9 +950,10 @@ impl Parser {
                 Err(err) => {
                     self.set_index(start_index);
                     return Err(ParserError::Str(format!(
-                        "parse_n_{name}s(): error while processing {name}s:\n  {:?}",
-                        err,
+                        "parse_{n}_{name}s(): error while processing {name}s:\n  {err:?}",
+                        err = err,
                         name = name,
+                        n = n
                     )));
                 }
             }
@@ -861,16 +967,8 @@ impl Parser {
     }
 
     fn parse_vector2f(&mut self) -> ParserResult<Vector2f> {
-        let start_index = self.index;
-        let x = self.parse_float()?;
-        let y = match self.parse_float() {
-            Ok(f) => f,
-            Err(err) => {
-                self.set_index(start_index);
-                return Err(err);
-            }
-        };
-        Ok(Vector2f::new(x, y))
+        let floats = self.parse_n(Self::parse_float, 2, "float")?;
+        Ok(Vector2f::new(floats[0], floats[1]))
     }
 
     fn parse_directive(&mut self) -> ParserResult<Directive> {
@@ -1148,6 +1246,43 @@ impl Parser {
         }
     }
 
+    fn parse_spectrum(&mut self) -> ParserResult<Spectrum> {
+        match self.peek() {
+            Ok(Token {
+                pos,
+                ty: TokenType::LBracket,
+            }) => {
+                let floats = self.parse_list(Self::parse_float, "float")?;
+                if floats.len() % 2 != 0 {
+                    return Err(ParserError::Str(format!(
+                        "{} parse_spectrum(): Expected an even number of floats but got {}",
+                        pos,
+                        floats.len()
+                    )));
+                }
+                Ok(Spectrum::Spectrum(
+                    floats.chunks(2).map(|chunk| (chunk[0], chunk[1])).collect(),
+                ))
+            }
+            Ok(Token {
+                ty: TokenType::Str(s),
+                ..
+            }) => {
+                self.next()?;
+                Ok(Spectrum::File(PathBuf::from(s)))
+            }
+            Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
+                "{pos} parse_spectrum(): expected '[' or string but got {ty:?}",
+                pos = pos,
+                ty = ty
+            ))),
+            Err(ParserError::Eof) => Err(ParserError::Str(
+                "parse_spectrum(): EOF while processing spectrum".to_owned(),
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
     pub fn parse(input: &str) -> ParserResult<(Vec<PreDirective>, Directive)> {
         let mut parser = Parser::new(input)?;
         Ok((parser.parse_predirectives()?, parser.parse_directive()?))
@@ -1301,14 +1436,17 @@ mod tests {
     #[test]
     fn test_parse_one_int() {
         let mut parser = Parser::new("1").unwrap();
-        assert_eq!(parser.parse_one_or_list(Parser::parse_int), Ok(vec![1]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_int, "int"),
+            Ok(vec![1])
+        );
     }
 
     #[test]
     fn test_parse_ints() {
         let mut parser = Parser::new("[1 2 3]").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_int),
+            parser.parse_one_or_list(Parser::parse_int, "int"),
             Ok(vec![1, 2, 3])
         );
     }
@@ -1316,26 +1454,29 @@ mod tests {
     #[test]
     fn test_parse_ints_err1() {
         let mut parser = Parser::new("[1 2 3.0]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_int).is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_int, "int").is_err());
     }
 
     #[test]
     fn test_parse_ints_err2() {
         let mut parser = Parser::new("[]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_int).is_err());
+        assert!(parser.parse_one_or_list(Parser::parse_int, "int").is_err());
     }
 
     #[test]
     fn test_parse_one_bool() {
         let mut parser = Parser::new(r#"["true"]"#).unwrap();
-        assert_eq!(parser.parse_one_or_list(Parser::parse_bool), Ok(vec![true]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_bool, "bool"),
+            Ok(vec![true])
+        );
     }
 
     #[test]
     fn test_parse_bools() {
         let mut parser = Parser::new(r#"["true" "false" "true"]"#).unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_bool),
+            parser.parse_one_or_list(Parser::parse_bool, "bool"),
             Ok(vec![true, false, true])
         );
     }
@@ -1343,20 +1484,27 @@ mod tests {
     #[test]
     fn test_parse_bools_err() {
         let mut parser = Parser::new(r#"["true" "false" 3.0]"#).unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_bool).is_err());
+        assert!(
+            parser
+                .parse_one_or_list(Parser::parse_bool, "bool")
+                .is_err()
+        );
     }
 
     #[test]
     fn test_parse_one_float() {
         let mut parser = Parser::new("1.0").unwrap();
-        assert_eq!(parser.parse_one_or_list(Parser::parse_float), Ok(vec![1.0]));
+        assert_eq!(
+            parser.parse_one_or_list(Parser::parse_float, "float"),
+            Ok(vec![1.0])
+        );
     }
 
     #[test]
     fn test_parse_floats() {
         let mut parser = Parser::new("[1 2.0 3]").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_float),
+            parser.parse_one_or_list(Parser::parse_float, "float"),
             Ok(vec![1.0, 2.0, 3.0])
         );
     }
@@ -1364,14 +1512,18 @@ mod tests {
     #[test]
     fn test_parse_floats_err() {
         let mut parser = Parser::new("[1 test 2]").unwrap();
-        assert!(parser.parse_one_or_list(Parser::parse_float).is_err());
+        assert!(
+            parser
+                .parse_one_or_list(Parser::parse_float, "float")
+                .is_err()
+        );
     }
 
     #[test]
     fn test_parse_one_point2() {
         let mut parser = Parser::new("1.0 2.0").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_point2f),
+            parser.parse_one_or_list(Parser::parse_point2f, "point2f"),
             Ok(vec![Point2f::new(1.0, 2.0)])
         );
     }
@@ -1380,7 +1532,7 @@ mod tests {
     fn test_parse_point2s() {
         let mut parser = Parser::new("[1 2.0 3 4 5 6]").unwrap();
         assert_eq!(
-            parser.parse_one_or_list(Parser::parse_point2f),
+            parser.parse_one_or_list(Parser::parse_point2f, "point2f"),
             Ok(vec![
                 Point2f::new(1.0, 2.0),
                 Point2f::new(3.0, 4.0),
@@ -1392,7 +1544,7 @@ mod tests {
     #[test]
     fn test_parse_point2s_err() {
         let mut parser = Parser::new("[1 2.0 3]").unwrap();
-        let res = parser.parse_one_or_list(Parser::parse_point2f);
+        let res = parser.parse_one_or_list(Parser::parse_point2f, "point2f");
         println!("{:?}", res);
         assert!(res.is_err());
     }
@@ -1423,6 +1575,62 @@ mod tests {
                     Point2f::new(3.0, 4.0),
                     Point2f::new(5.0, 6.0),
                 ],
+            )]
+        );
+    }
+
+    #[test]
+    fn test_parse_param_list_rgb() {
+        let mut parser = Parser::new(r#""rgb Kd" [.2 .5 .3]"#).unwrap();
+        let mut param_set = ParamSet::default();
+        assert_eq!(parser.parse_param_list(&mut param_set), Ok(()));
+        assert_eq!(
+            param_set.spectra,
+            vec![Param::new(
+                "Kd",
+                Pos::new(1, 1),
+                vec![Spectrum::Rgb(0.2, 0.5, 0.3)],
+            )]
+        );
+    }
+
+    #[test]
+    fn test_parse_param_list_rgb_err() {
+        let mut parser = Parser::new(r#""rgb Kd" [.2 .5]"#).unwrap();
+        let mut param_set = ParamSet::default();
+        assert!(parser.parse_param_list(&mut param_set).is_err());
+
+        let mut parser = Parser::new(r#""rgb Kd" [.2 .5 .3 .4]"#).unwrap();
+        let mut param_set = ParamSet::default();
+        assert!(parser.parse_param_list(&mut param_set).is_err());
+    }
+
+    #[test]
+    fn test_parse_param_list_spectrum() {
+        let mut parser = Parser::new(r#""spectrum Kd" [300 .3 400 .6]"#).unwrap();
+        let mut param_set = ParamSet::default();
+        assert_eq!(parser.parse_param_list(&mut param_set), Ok(()));
+        assert_eq!(
+            param_set.spectra,
+            vec![Param::new(
+                "Kd",
+                Pos::new(1, 1),
+                vec![Spectrum::Spectrum(vec![(300.0, 0.3), (400.0, 0.6)])],
+            )]
+        );
+    }
+
+    #[test]
+    fn test_parse_param_list_spectrum_file() {
+        let mut parser = Parser::new(r#""spectrum Kd" "filename""#).unwrap();
+        let mut param_set = ParamSet::default();
+        assert_eq!(parser.parse_param_list(&mut param_set), Ok(()));
+        assert_eq!(
+            param_set.spectra,
+            vec![Param::new(
+                "Kd",
+                Pos::new(1, 1),
+                vec![Spectrum::File(PathBuf::from("filename"))],
             )]
         );
     }

@@ -126,21 +126,51 @@ impl ParamSet {
         }
         self
     }
+
+    #[cfg(test)]
+    fn add_spectra(mut self, p: &[Param<Spectrum>]) -> Self {
+        {
+            let this = &mut self;
+            this.spectra.extend_from_slice(p);
+        }
+        self
+    }
+
+    #[cfg(test)]
+    fn add_textures(mut self, p: &[Param<String>]) -> Self {
+        {
+            let this = &mut self;
+            this.textures.extend_from_slice(p);
+        }
+        self
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Directive {
     Material(DirectiveStruct),
     Shape(DirectiveStruct),
+    LightSource(DirectiveStruct),
+    AreaLightSource(DirectiveStruct),
     Attribute(BlockStruct),
     Transform(BlockStruct),
     World(BlockStruct),
     Include(Pos, PathBuf),
+    Texture(TextureStruct),
 }
 
 #[derive(Debug, PartialEq)]
 pub struct DirectiveStruct {
     ty: String,
+    pos: Pos,
+    param_set: ParamSet,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TextureStruct {
+    name: String,
+    ty: String,
+    class: String,
     pos: Pos,
     param_set: ParamSet,
 }
@@ -638,6 +668,12 @@ impl Parser {
                             vec![Spectrum::Blackbody(rgb[0], rgb[1])],
                         ));
                     }
+                    "texture" => {
+                        self.next()?;
+                        param_set
+                            .textures
+                            .push(Param::new(var, pos, vec![self.parse_string()?]));
+                    }
                     _ => {
                         return Err(ParserError::Str(format!(
                             "{} parse_param_list(): expecting a type but got {}",
@@ -994,6 +1030,24 @@ impl Parser {
                     param_set,
                 }))
             }
+            "LightSource" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(Directive::LightSource(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
+            "AreaLightSource" => {
+                let ty = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(Directive::AreaLightSource(DirectiveStruct {
+                    ty,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
             "AttributeBegin" => Ok(Directive::Attribute(BlockStruct {
                 pos: start_pos,
                 children: self.parse_directives()?,
@@ -1010,6 +1064,19 @@ impl Parser {
                 start_pos,
                 PathBuf::from(self.parse_string()?),
             )),
+            "Texture" => {
+                let name = self.parse_string()?;
+                let ty = self.parse_string()?;
+                let class = self.parse_string()?;
+                self.parse_param_lists(&mut param_set)?;
+                Ok(Directive::Texture(TextureStruct {
+                    name,
+                    ty,
+                    class,
+                    pos: start_pos,
+                    param_set,
+                }))
+            }
             _ => Err(ParserError::Str(format!(
                 "{} parse_directive(): unknown identifier {}",
                 start_pos, id
@@ -1765,7 +1832,63 @@ mod tests {
                 ],
                 Directive::World(BlockStruct {
                     pos: Pos::new(13, 1),
-                    children: vec![],
+                    children: vec![
+                        Directive::LightSource(DirectiveStruct {
+                            pos: Pos::new(14, 1),
+                            ty: "infinite".to_owned(),
+                            param_set: ParamSet::default().add_spectra(&[Param::new(
+                                "L",
+                                Pos::new(14, 24),
+                                vec![Spectrum::Rgb(0.4, 0.45, 0.5)],
+                            )]),
+                        }),
+                        Directive::Attribute(BlockStruct {
+                            pos: Pos::new(16, 1),
+                            children: vec![
+                                Directive::Texture(TextureStruct {
+                                    name: "checks".to_owned(),
+                                    ty: "spectrum".to_owned(),
+                                    class: "checkerboard".to_owned(),
+                                    pos: Pos::new(17, 3),
+                                    param_set: ParamSet::default()
+                                        .add_floats(&[
+                                            Param::new("uscale", Pos::new(18, 11), vec![8.0]),
+                                            Param::new("vscale", Pos::new(18, 30), vec![8.0]),
+                                        ])
+                                        .add_spectra(&[
+                                            Param::new(
+                                                "tex1",
+                                                Pos::new(19, 11),
+                                                vec![Spectrum::Rgb(0.1, 0.1, 0.1)],
+                                            ),
+                                            Param::new(
+                                                "tex2",
+                                                Pos::new(19, 33),
+                                                vec![Spectrum::Rgb(0.8, 0.8, 0.8)],
+                                            ),
+                                        ]),
+                                }),
+                                Directive::Material(DirectiveStruct {
+                                    ty: "matte".to_owned(),
+                                    pos: Pos::new(20, 3),
+                                    param_set: ParamSet::default().add_textures(&[Param::new(
+                                        "Kd",
+                                        Pos::new(20, 20),
+                                        vec!["checks".to_owned()],
+                                    )]),
+                                }),
+                                Directive::Shape(DirectiveStruct {
+                                    ty: "sphere".to_owned(),
+                                    pos: Pos::new(21, 3),
+                                    param_set: ParamSet::default().add_floats(&[Param::new(
+                                        "radius",
+                                        Pos::new(21, 18),
+                                        vec![1.0],
+                                    )]),
+                                }),
+                            ],
+                        }),
+                    ],
                 })
             ))
         );

@@ -8,7 +8,7 @@ pub type Vector3f = Vector3<f64>;
 pub type Normal3f = Vector3<f64>;
 pub type Matrix3f = Matrix3<f64>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Spectrum {
     Rgb(f64, f64, f64),
     Xyz(f64, f64, f64),

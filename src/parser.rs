@@ -33,12 +33,6 @@ impl Token {
     }
 }
 
-// pub struct Config {
-//     before_transforms: Vec<Transform>,
-//     after_transforms: Vec<Transform>,
-//     transforms: Vec<Transform>,
-// }
-
 #[derive(Debug, PartialEq)]
 pub enum PreDirective {
     // Transforms

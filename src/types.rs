@@ -14,9 +14,21 @@ pub trait Nanable {
     fn is_nan(&self) -> bool;
 }
 
+impl Nanable for f32 {
+    fn is_nan(&self) -> bool {
+        f32::is_nan(*self)
+    }
+}
+
 impl Nanable for f64 {
     fn is_nan(&self) -> bool {
         f64::is_nan(*self)
+    }
+}
+
+impl Nanable for i64 {
+    fn is_nan(&self) -> bool {
+        false
     }
 }
 
@@ -36,6 +48,9 @@ impl<T: ElemType> HasNan for Point3<T> {
 }
 
 pub trait ElemType: Copy + PartialEq + PartialOrd + Signed + Debug + Nanable + 'static {}
+impl ElemType for f64 {}
+impl ElemType for f32 {}
+impl ElemType for i64 {}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Spectrum {

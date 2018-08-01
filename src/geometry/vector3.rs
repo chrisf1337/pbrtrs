@@ -1,5 +1,5 @@
-use na::{Point2, Point3, Vector3};
-use types::*;
+use na::{Point3, Vector3};
+use types::{pmax, pmin, ElemType, Vector3f};
 
 pub fn min_component<T: ElemType>(v: &Vector3<T>) -> T {
     v[v.imin()]
@@ -45,7 +45,14 @@ pub fn coordinate_system<T: ElemType>(v1: &Vector3f) -> (Vector3f, Vector3f) {
     (v2, v3)
 }
 
-pub fn pt3_to_pt2<T: ElemType>(p: &Point3<T>) -> Point2<T> {
-    assert!(!p.has_nan());
-    Point2::new(p[0], p[1])
+pub fn to_pt3<T: ElemType>(v: &Vector3<T>) -> Point3<T> {
+    Point3::new(v[0], v[1], v[2])
+}
+
+pub fn face_forward(v1: &Vector3f, v2: &Vector3f) -> Vector3f {
+    if v1.dot(v2) < 0.0 {
+        -v1
+    } else {
+        *v1
+    }
 }

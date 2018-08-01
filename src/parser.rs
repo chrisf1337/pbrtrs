@@ -39,7 +39,7 @@ pub enum PreDirective {
     Identity(Pos),
     Translate(Pos, Vector3f),
     Scale(Pos, Vector3f),
-    Rotate(Pos, f64, Vector3f),
+    Rotate(Pos, Float, Vector3f),
     LookAt(Pos, Matrix3f),
     CoordinateSystem(Pos, String),
     CoordSysTransform(Pos, String),
@@ -47,7 +47,7 @@ pub enum PreDirective {
     ConcatTransform(Pos, Matrix3f),
     // Transform timing
     ActiveTransform(Pos, String),
-    TransformTimes(Pos, f64, f64),
+    TransformTimes(Pos, Float, Float),
 
     // Scene-wide options
     Camera(DirectiveStruct),
@@ -64,7 +64,7 @@ pub enum PreDirective {
 pub struct ParamSet {
     pub bools: Vec<Param<bool>>,
     pub ints: Vec<Param<isize>>,
-    pub floats: Vec<Param<f64>>,
+    pub floats: Vec<Param<Float>>,
     pub point2fs: Vec<Param<Point2f>>,
     pub vector2fs: Vec<Param<Vector2f>>,
     pub point3fs: Vec<Param<Point3f>>,
@@ -95,7 +95,7 @@ impl Default for ParamSet {
 
 impl ParamSet {
     #[cfg(test)]
-    fn add_floats(mut self, p: &[Param<f64>]) -> Self {
+    fn add_floats(mut self, p: &[Param<Float>]) -> Self {
         {
             let this = &mut self;
             this.floats.extend_from_slice(p);
@@ -196,7 +196,7 @@ impl<T> Param<T> {
 enum TokenType {
     Identifier(String),
     Int(isize),
-    Float(f64),
+    Float(Float),
     Str(String),
     LBracket,
     RBracket,
@@ -397,8 +397,8 @@ impl Tokenizer {
                             return Ok(Token {
                                 pos: start_pos,
                                 ty: TokenType::Float(
-                                    num_chars.into_iter().collect::<String>().parse::<f64>()?
-                                        * f64::powf(10.0, f),
+                                    num_chars.into_iter().collect::<String>().parse::<Float>()?
+                                        * Float::powf(10.0, f),
                                 ),
                             })
                         }
@@ -415,8 +415,8 @@ impl Tokenizer {
                             return Ok(Token {
                                 pos: start_pos,
                                 ty: TokenType::Float(
-                                    num_chars.into_iter().collect::<String>().parse::<f64>()?
-                                        * f64::powf(10.0, i as f64),
+                                    num_chars.into_iter().collect::<String>().parse::<Float>()?
+                                        * Float::powf(10.0, i as Float),
                                 ),
                             })
                         }
@@ -910,7 +910,7 @@ impl Parser {
         }
     }
 
-    fn parse_float(&mut self) -> ParserResult<f64> {
+    fn parse_float(&mut self) -> ParserResult<Float> {
         match self.peek() {
             Ok(Token {
                 ty: TokenType::Float(f),
@@ -924,7 +924,7 @@ impl Parser {
                 ..
             }) => {
                 self.next()?;
-                Ok(i as f64)
+                Ok(i as Float)
             }
             Ok(Token { pos, ty }) => Err(ParserError::Str(format!(
                 "{} parse_float(): expected float but got {:?}",
@@ -937,7 +937,7 @@ impl Parser {
         }
     }
 
-    fn parse_floats(&mut self) -> ParserResult<Vec<f64>> {
+    fn parse_floats(&mut self) -> ParserResult<Vec<Float>> {
         self.parse_many(Self::parse_float, "float")
     }
 
@@ -1432,7 +1432,7 @@ mod tests {
             Tokenizer::tokenize("1.23e12"),
             Ok(vec![Token {
                 pos: Pos::new(1, 1),
-                ty: TokenType::Float(1.23 * f64::powf(10.0, 12.0)),
+                ty: TokenType::Float(1.23 * Float::powf(10.0, 12.0)),
             }])
         );
     }
@@ -1443,7 +1443,7 @@ mod tests {
             Tokenizer::tokenize("1.23e-12"),
             Ok(vec![Token {
                 pos: Pos::new(1, 1),
-                ty: TokenType::Float(1.23 * f64::powf(10.0, -12.0)),
+                ty: TokenType::Float(1.23 * Float::powf(10.0, -12.0)),
             }])
         );
     }
@@ -1817,8 +1817,7 @@ mod tests {
                                 "filename",
                                 Pos::new(10, 14),
                                 vec!["simple.png".to_owned()],
-                            )])
-                            .add_ints(&[
+                            )]).add_ints(&[
                                 Param::new("xresolution", Pos::new(11, 6), vec![400]),
                                 Param::new("yresolution", Pos::new(11, 34), vec![400]),
                             ]),
@@ -1848,8 +1847,7 @@ mod tests {
                                         .add_floats(&[
                                             Param::new("uscale", Pos::new(18, 11), vec![8.0]),
                                             Param::new("vscale", Pos::new(18, 30), vec![8.0]),
-                                        ])
-                                        .add_spectra(&[
+                                        ]).add_spectra(&[
                                             Param::new(
                                                 "tex1",
                                                 Pos::new(19, 11),

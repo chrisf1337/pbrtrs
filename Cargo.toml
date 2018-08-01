@@ -9,3 +9,7 @@ num-traits = "*"
 
 [dev-dependencies]
 pretty_assertions = "*"
+
+[features]
+default = []
+float_as_f64 = []

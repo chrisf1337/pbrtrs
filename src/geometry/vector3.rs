@@ -1,5 +1,5 @@
 use na::{Point3, Vector3};
-use types::{pmax, pmin, ElemType, Vector3f};
+use types::{pmax, pmin, ElemType, Float, Vector3f};
 
 pub fn min_component<T: ElemType>(v: &Vector3<T>) -> T {
     v[v.imin()]
@@ -37,9 +37,9 @@ pub fn permute<T: ElemType>(v: &Vector3<T>, x: usize, y: usize, z: usize) -> Vec
 
 pub fn coordinate_system<T: ElemType>(v1: &Vector3f) -> (Vector3f, Vector3f) {
     let v2 = if v1[0].abs() > v1[1].abs() {
-        Vector3::new(-v1[2], 0.0, v1[0]) / f64::sqrt(v1[0] * v1[0] + v1[2] * v1[2])
+        Vector3::new(-v1[2], 0.0, v1[0]) / Float::sqrt(v1[0] * v1[0] + v1[2] * v1[2])
     } else {
-        Vector3::new(0.0, v1[2], -v1[1]) / f64::sqrt(v1[1] * v1[1] + v1[2] * v1[2])
+        Vector3::new(0.0, v1[2], -v1[1]) / Float::sqrt(v1[1] * v1[1] + v1[2] * v1[2])
     };
     let v3 = v1.cross(&v2);
     (v2, v3)

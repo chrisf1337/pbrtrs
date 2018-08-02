@@ -1,3 +1,4 @@
-pub mod point3;
+pub mod boundingbox;
+pub mod point;
 pub mod ray;
-pub mod vector3;
+pub mod vector;

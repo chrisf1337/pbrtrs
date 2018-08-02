@@ -5,7 +5,8 @@ authors = ["Christopher Fu <chrisf1337@gmail.com>"]
 
 [dependencies]
 nalgebra = "*"
-num-traits = "*"
+alga = "*"
+num = "*"
 
 [dev-dependencies]
 pretty_assertions = "*"

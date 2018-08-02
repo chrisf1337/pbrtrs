@@ -1,5 +1,6 @@
+use alga::general::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub};
 use na::{Matrix3, Point2, Point3, Vector2, Vector3};
-use num_traits::sign::Signed;
+use num::Signed;
 use std::fmt::Debug;
 use std::path::PathBuf;
 
@@ -19,19 +20,57 @@ pub const INFINITY: Float = ::std::f64::INFINITY;
 #[cfg(not(feature = "float_as_f64"))]
 pub const INFINITY: Float = ::std::f32::INFINITY;
 
-pub trait Nanable {
+pub trait ElemType:
+    Copy
+    + PartialEq
+    + PartialOrd
+    + Signed
+    + Debug
+    + ClosedAdd
+    + ClosedSub
+    + ClosedMul
+    + ClosedDiv
+    + 'static
+{
     fn is_nan(&self) -> bool;
+    fn max_value() -> Self;
+    fn min_value() -> Self;
+    fn from_int(i: isize) -> Self;
 }
 
-impl Nanable for Float {
+impl ElemType for Float {
     fn is_nan(&self) -> bool {
         Float::is_nan(*self)
     }
+
+    fn max_value() -> Float {
+        INFINITY
+    }
+
+    fn min_value() -> Float {
+        -INFINITY
+    }
+
+    fn from_int(i: isize) -> Float {
+        i as Float
+    }
 }
 
-impl Nanable for i64 {
+impl ElemType for i64 {
     fn is_nan(&self) -> bool {
         false
+    }
+
+    fn max_value() -> i64 {
+        i64::max_value()
+    }
+
+    fn min_value() -> i64 {
+        i64::min_value()
+    }
+
+    fn from_int(i: isize) -> i64 {
+        i as i64
     }
 }
 
@@ -49,10 +88,6 @@ impl<T: ElemType> HasNan for Point3<T> {
         false
     }
 }
-
-pub trait ElemType: Copy + PartialEq + PartialOrd + Signed + Debug + Nanable + 'static {}
-impl ElemType for Float {}
-impl ElemType for i64 {}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Spectrum {

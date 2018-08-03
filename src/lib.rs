@@ -9,3 +9,5 @@ extern crate num;
 
 mod core;
 pub mod parser;
+
+pub use core::matrix::Matrix4;

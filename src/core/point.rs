@@ -3,38 +3,38 @@ use core::{pmax, pmin, ElemType, Float, HasNan, Point3f};
 use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Point2<T: ElemType> {
+pub struct Point2<T: Clone> {
     pub x: T,
     pub y: T,
 }
 
 impl<T: ElemType> Point2<T> {
-    pub fn new(x: T, y: T) -> Self {
-        Self { x, y }
+    pub fn new(x: T, y: T) -> Point2<T> {
+        Point2 { x, y }
     }
 
-    pub fn abs(&self) -> Self {
+    pub fn abs(&self) -> Point2<T> {
         Point2::new(self.x.abs(), self.y.abs())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Point3<T: ElemType> {
+pub struct Point3<T: Clone> {
     pub x: T,
     pub y: T,
     pub z: T,
 }
 
 impl<T: ElemType> Point3<T> {
-    pub fn new(x: T, y: T, z: T) -> Self {
-        Self { x, y, z }
+    pub fn new(x: T, y: T, z: T) -> Point3<T> {
+        Point3 { x, y, z }
     }
 
-    pub fn abs(&self) -> Self {
+    pub fn abs(&self) -> Point3<T> {
         Point3::new(self.x.abs(), self.y.abs(), self.z.abs())
     }
 
-    pub fn min(&self, p: &Self) -> Self {
+    pub fn min(&self, p: &Point3<T>) -> Point3<T> {
         Point3::new(
             pmin(&[self.x, p.x]),
             pmin(&[self.y, p.y]),
@@ -42,7 +42,7 @@ impl<T: ElemType> Point3<T> {
         )
     }
 
-    pub fn max(&self, p: &Self) -> Self {
+    pub fn max(&self, p: &Point3<T>) -> Point3<T> {
         Point3::new(
             pmax(&[self.x, p.x]),
             pmax(&[self.y, p.y]),
@@ -52,20 +52,20 @@ impl<T: ElemType> Point3<T> {
 }
 
 impl<T: ElemType> From<Vector3<T>> for Point3<T> {
-    fn from(v: Vector3<T>) -> Self {
+    fn from(v: Vector3<T>) -> Point3<T> {
         Point3::new(v.x, v.y, v.z)
     }
 }
 
 impl<T: ElemType> From<Point3<T>> for Point2<T> {
-    fn from(p: Point3<T>) -> Self {
+    fn from(p: Point3<T>) -> Point2<T> {
         assert!(!p.has_nan());
         Point2::new(p.x, p.y)
     }
 }
 
 impl<T: ElemType> Add<Vector3<T>> for Point3<T> {
-    type Output = Self;
+    type Output = Point3<T>;
 
     fn add(self, other: Vector3<T>) -> Self::Output {
         Point3::new(self.x + other.x, self.y + other.y, self.z + other.z)
@@ -73,7 +73,7 @@ impl<T: ElemType> Add<Vector3<T>> for Point3<T> {
 }
 
 impl<T: ElemType> Sub<Vector3<T>> for Point3<T> {
-    type Output = Self;
+    type Output = Point3<T>;
 
     fn sub(self, other: Vector3<T>) -> Self::Output {
         Point3::new(self.x - other.x, self.y - other.y, self.z - other.z)

@@ -1,12 +1,15 @@
 pub mod boundingbox;
 pub mod matrix;
+pub mod normal;
 pub mod point;
 pub mod ray;
+pub mod transform;
 pub mod vector;
 
 use alga::general::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub};
 use core::{
-    matrix::Matrix3,
+    matrix::{Matrix3, Matrix4},
+    normal::Normal3,
     point::{Point2, Point3},
     vector::{Vector2, Vector3},
 };
@@ -22,8 +25,9 @@ pub type Point2f = Point2<Float>;
 pub type Point3f = Point3<Float>;
 pub type Vector2f = Vector2<Float>;
 pub type Vector3f = Vector3<Float>;
-pub type Normal3f = Vector3<Float>;
+pub type Normal3f = Normal3<Float>;
 pub type Matrix3f = Matrix3<Float>;
+pub type Matrix4f = Matrix4<Float>;
 #[cfg(feature = "float_as_f64")]
 pub type Float = f64;
 #[cfg(not(feature = "float_as_f64"))]

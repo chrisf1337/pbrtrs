@@ -1161,10 +1161,11 @@ impl Parser {
                 }
                 Ok(PreDirective::LookAt(
                     start_pos,
-                    Matrix3f::new(
-                        floats[0], floats[1], floats[2], floats[3], floats[4], floats[5],
-                        floats[6], floats[7], floats[8],
-                    ),
+                    Matrix3f::new([
+                        [floats[0], floats[1], floats[2]],
+                        [floats[3], floats[4], floats[5]],
+                        [floats[6], floats[7], floats[8]],
+                    ]),
                 ))
             }
             "CoordinateSystem" => {
@@ -1186,10 +1187,11 @@ impl Parser {
                 }
                 Ok(PreDirective::Transform(
                     start_pos,
-                    Matrix3f::new(
-                        floats[0], floats[1], floats[2], floats[3], floats[4], floats[5],
-                        floats[6], floats[7], floats[8],
-                    ),
+                    Matrix3f::new([
+                        [floats[0], floats[1], floats[2]],
+                        [floats[3], floats[4], floats[5]],
+                        [floats[6], floats[7], floats[8]],
+                    ]),
                 ))
             }
             "ConcatTransform" => {
@@ -1203,10 +1205,11 @@ impl Parser {
                 }
                 Ok(PreDirective::ConcatTransform(
                     start_pos,
-                    Matrix3f::new(
-                        floats[0], floats[1], floats[2], floats[3], floats[4], floats[5],
-                        floats[6], floats[7], floats[8],
-                    ),
+                    Matrix3f::new([
+                        [floats[0], floats[1], floats[2]],
+                        [floats[3], floats[4], floats[5]],
+                        [floats[6], floats[7], floats[8]],
+                    ]),
                 ))
             }
             "ActiveTransform" => {
@@ -1784,7 +1787,7 @@ mod tests {
                     PreDirective::Include(Pos::new(1, 1), PathBuf::from("file1.pbrt")),
                     PreDirective::LookAt(
                         Pos::new(3, 1),
-                        Matrix3f::new(3.0, 4.0, 1.5, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0),
+                        Matrix3f::new([[3.0, 4.0, 1.5], [0.5, 0.5, 0.0], [0.0, 0.0, 1.0]]),
                     ),
                     PreDirective::Camera(DirectiveStruct {
                         pos: Pos::new(6, 1),

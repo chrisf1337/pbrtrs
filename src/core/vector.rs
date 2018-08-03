@@ -3,12 +3,12 @@ use core::{pmax, pmin, ElemType, Float, Vector3f};
 use std::ops::{Add, Div, Index, Mul, Neg, Sub};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Vector2<T: ElemType> {
+pub struct Vector2<T: Clone> {
     pub x: T,
     pub y: T,
 }
 
-impl<T: ElemType> Index<usize> for Vector2<T> {
+impl<T: Clone> Index<usize> for Vector2<T> {
     type Output = T;
 
     fn index(&self, i: usize) -> &Self::Output {
@@ -21,7 +21,7 @@ impl<T: ElemType> Index<usize> for Vector2<T> {
     }
 }
 
-impl<T: ElemType> Vector2<T> {
+impl<T: Clone> Vector2<T> {
     pub fn new(x: T, y: T) -> Self {
         Self { x, y }
     }
@@ -38,13 +38,13 @@ impl<T: ElemType> Div<T> for Vector2<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Vector3<T: ElemType> {
+pub struct Vector3<T: Clone> {
     pub x: T,
     pub y: T,
     pub z: T,
 }
 
-impl<T: ElemType> Index<usize> for Vector3<T> {
+impl<T: Clone> Index<usize> for Vector3<T> {
     type Output = T;
 
     fn index(&self, i: usize) -> &Self::Output {
@@ -77,7 +77,7 @@ impl<T: ElemType> Vector3<T> {
     }
 
     pub fn cross(&self, v: &Self) -> Self {
-        Vector3::new(
+        Self::new(
             self.y * v.z - self.z * v.y,
             self.z * v.x - self.x * v.z,
             self.x * v.y - self.y * v.x,
@@ -85,7 +85,7 @@ impl<T: ElemType> Vector3<T> {
     }
 
     pub fn permute(&self, x: usize, y: usize, z: usize) -> Self {
-        Vector3::new(self[x], self[y], self[z])
+        Self::new(self[x], self[y], self[z])
     }
 
     pub fn face_forward(&self, v2: &Self) -> Self {
@@ -97,7 +97,7 @@ impl<T: ElemType> Vector3<T> {
     }
 
     pub fn min(&self, v: &Self) -> Self {
-        Vector3::new(
+        Self::new(
             pmin(&[self.x, v.x]),
             pmin(&[self.y, v.y]),
             pmin(&[self.z, v.z]),
@@ -105,7 +105,7 @@ impl<T: ElemType> Vector3<T> {
     }
 
     pub fn max(&self, v: &Self) -> Self {
-        Vector3::new(
+        Self::new(
             pmax(&[self.x, v.x]),
             pmax(&[self.y, v.y]),
             pmax(&[self.z, v.z]),

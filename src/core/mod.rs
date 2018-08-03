@@ -1,8 +1,22 @@
+pub mod boundingbox;
+pub mod matrix;
+pub mod point;
+pub mod ray;
+pub mod vector;
+
 use alga::general::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub};
-use na::{Matrix3, Point2, Point3, Vector2, Vector3};
-use num::Signed;
+use core::{
+    matrix::Matrix3,
+    point::{Point2, Point3},
+    vector::{Vector2, Vector3},
+};
+use num::{cast::AsPrimitive, Signed};
 use std::fmt::Debug;
 use std::path::PathBuf;
+
+pub fn lerp(t: Float, v1: Float, v2: Float) -> Float {
+    (1.0 - t) * v1 + t * v2
+}
 
 pub type Point2f = Point2<Float>;
 pub type Point3f = Point3<Float>;
@@ -30,6 +44,8 @@ pub trait ElemType:
     + ClosedSub
     + ClosedMul
     + ClosedDiv
+    + AsPrimitive<Float>
+    + AsPrimitive<i64>
     + 'static
 {
     fn is_nan(&self) -> bool;
@@ -74,18 +90,29 @@ impl ElemType for i64 {
     }
 }
 
+pub trait ToFloat {
+    fn to_float(self) -> Float;
+}
+
+impl ToFloat for Float {
+    fn to_float(self) -> Float {
+        self
+    }
+}
+
+impl ToFloat for i64 {
+    fn to_float(self) -> Float {
+        self as Float
+    }
+}
+
 pub trait HasNan {
     fn has_nan(&self) -> bool;
 }
 
 impl<T: ElemType> HasNan for Point3<T> {
     fn has_nan(&self) -> bool {
-        for i in self.iter() {
-            if i.is_nan() {
-                return true;
-            }
-        }
-        false
+        self.x.is_nan() || self.y.is_nan() || self.z.is_nan()
     }
 }
 
@@ -100,18 +127,22 @@ pub enum Spectrum {
 
 pub struct Medium {}
 
-pub fn pmin<T: PartialOrd>(a: T, b: T) -> T {
-    if a < b {
-        a
-    } else {
-        b
+pub fn pmin<T: PartialOrd + Copy>(elems: &[T]) -> T {
+    let mut min = &elems[0];
+    for e in &elems[1..] {
+        if e < min {
+            min = e;
+        }
     }
+    *min
 }
 
-pub fn pmax<T: PartialOrd>(a: T, b: T) -> T {
-    if a > b {
-        a
-    } else {
-        b
+pub fn pmax<T: PartialOrd + Copy>(elems: &[T]) -> T {
+    let mut max = &elems[0];
+    for e in &elems[1..] {
+        if e > max {
+            max = e;
+        }
     }
+    *max
 }

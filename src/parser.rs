@@ -1,7 +1,7 @@
+use core::*;
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
 use std::path::PathBuf;
-use types::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct Pos {

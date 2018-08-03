@@ -1,4 +1,4 @@
-use types::{Float, Medium, Point3f, Vector3f, INFINITY};
+use core::{Float, Medium, Point3f, Vector3f, INFINITY};
 
 pub struct Ray {
     pub o: Point3f,

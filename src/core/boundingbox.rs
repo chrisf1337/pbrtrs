@@ -1,7 +1,9 @@
-use geometry::point;
-use na::{Point2, Point3, Vector3};
-use num::{Integer, One, Zero};
-use types::{pmax, pmin, ElemType, Float, Point3f};
+use core::{pmax, pmin, ElemType, Float, Point3f};
+use core::{
+    point::{Point2, Point3},
+    vector::Vector3,
+};
+use num::Integer;
 
 pub struct Bounds2<T: ElemType> {
     pub p_min: Point2<T>,
@@ -18,8 +20,16 @@ type Bounds3f = Bounds3<Float>;
 impl<T: ElemType> Bounds3<T> {
     pub fn new(p1: Point3<T>, p2: Point3<T>) -> Self {
         Bounds3 {
-            p_min: Point3::new(pmin(p1.x, p2.x), pmin(p1.y, p2.y), pmin(p1.z, p2.z)),
-            p_max: Point3::new(pmax(p1.x, p2.x), pmax(p1.y, p2.y), pmax(p1.z, p2.z)),
+            p_min: Point3::new(
+                pmin(&[p1.x, p2.x]),
+                pmin(&[p1.y, p2.y]),
+                pmin(&[p1.z, p2.z]),
+            ),
+            p_max: Point3::new(
+                pmax(&[p1.x, p2.x]),
+                pmax(&[p1.y, p2.y]),
+                pmax(&[p1.z, p2.z]),
+            ),
         }
     }
 
@@ -56,14 +66,14 @@ impl<T: ElemType> Bounds3<T> {
     pub fn union_pt(&self, p: &Point3<T>) -> Bounds3<T> {
         Bounds3::new(
             Point3::new(
-                pmin(self.p_min.x, p.x),
-                pmin(self.p_min.y, p.y),
-                pmin(self.p_min.z, p.z),
+                pmin(&[self.p_min.x, p.x]),
+                pmin(&[self.p_min.y, p.y]),
+                pmin(&[self.p_min.z, p.z]),
             ),
             Point3::new(
-                pmax(self.p_max.x, p.x),
-                pmax(self.p_max.y, p.y),
-                pmax(self.p_max.z, p.z),
+                pmax(&[self.p_max.x, p.x]),
+                pmax(&[self.p_max.y, p.y]),
+                pmax(&[self.p_max.z, p.z]),
             ),
         )
     }
@@ -71,14 +81,14 @@ impl<T: ElemType> Bounds3<T> {
     pub fn union(&self, b: &Bounds3<T>) -> Bounds3<T> {
         Bounds3::new(
             Point3::new(
-                pmin(self.p_min.x, b.p_min.x),
-                pmin(self.p_min.y, b.p_min.y),
-                pmin(self.p_min.z, b.p_min.z),
+                pmin(&[self.p_min.x, b.p_min.x]),
+                pmin(&[self.p_min.y, b.p_min.y]),
+                pmin(&[self.p_min.z, b.p_min.z]),
             ),
             Point3::new(
-                pmax(self.p_max.x, b.p_max.x),
-                pmax(self.p_max.y, b.p_max.y),
-                pmax(self.p_max.z, b.p_max.z),
+                pmax(&[self.p_max.x, b.p_max.x]),
+                pmax(&[self.p_max.y, b.p_max.y]),
+                pmax(&[self.p_max.z, b.p_max.z]),
             ),
         )
     }
@@ -86,14 +96,14 @@ impl<T: ElemType> Bounds3<T> {
     pub fn intersect(&self, b: &Bounds3<T>) -> Bounds3<T> {
         Bounds3::new(
             Point3::new(
-                pmax(self.p_min.x, b.p_min.x),
-                pmax(self.p_min.y, b.p_min.y),
-                pmax(self.p_min.z, b.p_min.z),
+                pmax(&[self.p_min.x, b.p_min.x]),
+                pmax(&[self.p_min.y, b.p_min.y]),
+                pmax(&[self.p_min.z, b.p_min.z]),
             ),
             Point3::new(
-                pmin(self.p_max.x, b.p_max.x),
-                pmin(self.p_max.y, b.p_max.y),
-                pmin(self.p_max.z, b.p_max.z),
+                pmin(&[self.p_max.x, b.p_max.x]),
+                pmin(&[self.p_max.y, b.p_max.y]),
+                pmin(&[self.p_max.z, b.p_max.z]),
             ),
         )
     }
@@ -197,10 +207,10 @@ impl<T: ElemType> Iterator for Bounds2Iter<T> {
             None
         } else {
             if self.x >= self.p_max.x {
-                self.x = Zero::zero();
-                self.y += One::one();
+                self.x = T::from_int(0);
+                self.y += T::from_int(1);
             } else {
-                self.x += One::one();
+                self.x += T::from_int(1);
             }
             Some(Point2::new(self.x, self.y))
         }
@@ -208,21 +218,21 @@ impl<T: ElemType> Iterator for Bounds2Iter<T> {
 }
 
 pub fn bounding_sphere(bounds: &Bounds3f) -> (Point3f, Float) {
-    let center = (bounds.p_min + point::to_vec3(&bounds.p_max)) / 2.0;
+    let center = (bounds.p_min + Vector3::from(bounds.p_max)) / 2.0;
     (
         center,
         if bounds.inside(&center) {
-            (center - bounds.p_max).norm()
+            (center - bounds.p_max).len()
         } else {
-            Zero::zero()
+            0.0
         },
     )
 }
 
 pub fn lerp(bounds: &Bounds3f, t: &Point3f) -> Point3f {
     Point3f::new(
-        ::lerp(t.x, bounds.p_min.x, bounds.p_max.x),
-        ::lerp(t.y, bounds.p_min.y, bounds.p_max.y),
-        ::lerp(t.z, bounds.p_min.z, bounds.p_max.z),
+        ::core::lerp(t.x, bounds.p_min.x, bounds.p_max.x),
+        ::core::lerp(t.y, bounds.p_min.y, bounds.p_max.y),
+        ::core::lerp(t.z, bounds.p_min.z, bounds.p_max.z),
     )
 }

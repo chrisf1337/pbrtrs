@@ -1,5 +1,5 @@
 use core::{ElemType, Float, Matrix4f};
-use std::ops::{Add, Mul};
+use std::ops::{Add, Index, Mul};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Matrix3<T> {
@@ -147,6 +147,15 @@ impl<T: ElemType> Mul for Matrix4<T> {
             }
         }
         Matrix4::new(mat)
+    }
+}
+
+impl<T: ElemType> Index<usize> for Matrix4<T> {
+    type Output = [T; 4];
+
+    fn index(&self, i: usize) -> &Self::Output {
+        assert!(i < 4);
+        &self.mat[i]
     }
 }
 

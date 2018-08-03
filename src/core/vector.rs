@@ -1,5 +1,5 @@
 use core::point::Point3;
-use core::{pmax, pmin, ElemType, Float, Vector3f};
+use core::{pmax, pmin, transform::Transform, ElemType, Float, Vector3f};
 use std::ops::{Add, Div, Index, Mul, Neg, Sub};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,6 +132,17 @@ impl<T: ElemType> Vector3<T> {
         } else {
             2
         }
+    }
+
+    pub fn transform(&self, t: &Transform) -> Vector3f {
+        let x: Float = self.x.as_();
+        let y: Float = self.y.as_();
+        let z: Float = self.z.as_();
+        Vector3::new(
+            t.m[0][0] * x + t.m[0][1] * y + t.m[0][2] * z,
+            t.m[1][0] * x + t.m[1][1] * y + t.m[1][2] * z,
+            t.m[2][0] * x + t.m[2][1] * y + t.m[2][2] * z,
+        )
     }
 }
 

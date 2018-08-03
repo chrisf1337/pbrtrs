@@ -150,3 +150,7 @@ pub fn pmax<T: PartialOrd + Copy>(elems: &[T]) -> T {
     }
     *max
 }
+
+pub fn not_one(x: Float) -> bool {
+    x < 0.999 || x > 1.001
+}
